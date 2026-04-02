@@ -135,34 +135,63 @@ const removeCharacter = (index) => {
   }
 }
 
-// 生成角色图（调用后端）
+/**
+ * 生成角色形象图片
+ * 作用：根据角色名称 + 角色描述提示词，调用后端AI绘图接口生成角色图
+ * 生成成功后通知父组件更新页面，并刷新用户积分
+ *
+ * @param char - 当前角色对象（包含 name 角色名、characterPrompt 角色提示词）
+ */
 const generateCharacterImage = async (char) => {
+  // 前端校验1：角色名称不能为空
   if (!char.name.trim()) {
     ElMessage.warning('请输入角色名')
     return
   }
+
+  // 前端校验2：角色提示词不能为空（AI绘图必须有描述）
   if (!char.characterPrompt.trim()) {
     ElMessage.warning('请输入角色提示词')
     return
   }
 
+  // 开启当前角色的加载状态（防止重复点击生成按钮）
+  // 使用 char.name 作为 key，保证每个角色独立 loading
   loadingStates.value[char.name] = true
+
   try {
-    const res = await generateCharacter(char.name, char.characterPrompt) 
+    // 调用后端接口：传入角色名 + 角色提示词，请求AI生成图片
+    const res = await generateCharacter(char.name, char.characterPrompt)
+
+    // 判断后端返回状态：200 表示生成成功
     if (res.data.code === 200) {
-      let imageUrl = res.data.data;
+      // 获取返回的图片地址
+      let imageUrl = res.data.data
+
+      // 兼容返回格式：
+      // 如果返回的是对象 { imageUrl: "xxx" }，则取出 imageUrl
+      // 如果直接返回字符串，则直接使用
       if (typeof imageUrl === 'object' && imageUrl.imageUrl !== undefined) {
-        imageUrl = imageUrl.imageUrl;
+        imageUrl = imageUrl.imageUrl
       }
+
+      // 向父组件抛出事件：传递角色名 + 生成好的图片地址
       emit('character-generated', { name: char.name, imageUrl })
+
+      // 提示用户生成成功
       ElMessage.success(`角色 ${char.name} 图片生成成功`)
-      refreshPoints() // 刷新积分
+
+      // 刷新用户积分（生成图片消耗积分）
+      refreshPoints()
     } else {
+      // 后端返回失败：提示错误信息
       ElMessage.error(res.data.msg)
     }
   } catch (err) {
+    // 网络异常 / 请求失败
     ElMessage.error('生成失败')
   } finally {
+    // 无论成功/失败，最终都会关闭当前角色的加载状态
     loadingStates.value[char.name] = false
   }
 }

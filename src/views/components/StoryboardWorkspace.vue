@@ -293,27 +293,52 @@ const handleSceneUpload = (index, options) => {
   refreshPoints()
 }
 
-// 生成场景图
+/**
+ * 生成场景图
+ * 作用：根据分镜中的场景描述提示词，调用AI绘图接口生成场景图片
+ * 生成成功后直接赋值给当前分镜，并刷新用户积分
+ * 
+ * @param index - 当前分镜在数组中的下标（定位哪一个分镜）
+ */
 const generateScene = async (index) => {
+  // 1. 根据下标获取当前要生成场景的分镜数据
   const story = localStoryboards.value[index]
+
+  // 2. 前端校验：场景提示词不能为空，为空则提示并终止执行
   if (!story.scenePrompt.trim()) return ElMessage.warning('请输入场景提示词')
+
+  // 3. 开启当前分镜的loading状态，防止用户重复点击
   sceneLoading.value[index] = true
+
   try {
+    // 4. 调用后端API，传入场景提示词，请求生成场景图
     const res = await generateSceneApi(story.scenePrompt)
+
+    // 5. 判断接口返回状态：200 表示生成成功
     if (res.data.code === 200) {
-      let imageUrl = res.data.data;
+      // 6. 取出返回的图片地址（兼容对象/字符串两种格式）
+      let imageUrl = res.data.data
       if (typeof imageUrl === 'object' && imageUrl.imageUrl !== undefined) {
-        imageUrl = imageUrl.imageUrl;
+        imageUrl = imageUrl.imageUrl
       }
+
+      // 7. 将生成好的图片URL赋值给当前分镜，页面自动渲染
       story.sceneImageUrl = imageUrl
+
+      // 8. 提示用户生成成功
       ElMessage.success('场景图生成成功')
+
+      // 9. 调用注入的方法，刷新用户积分（生成图片消耗积分）
       refreshPoints()
     } else {
+      // 10. 后端返回失败，提示错误信息
       ElMessage.error(res.data.msg)
     }
   } catch (err) {
+    // 11. 网络异常或请求失败
     ElMessage.error('生成失败')
   } finally {
+    // 12. 无论成功失败，最终都会关闭当前分镜的loading状态
     sceneLoading.value[index] = false
   }
 }
@@ -365,52 +390,91 @@ const handleVideoUpload = (index, options) => {
   ElMessage.success('测试视频已加载（刷新页面后失效）')
 }
 
-// 生成视频
+/**
+ * 生成视频函数
+ * 作用：根据分镜的关键帧图片和视频提示词，调用后端API发起视频生成任务，并轮询查询任务状态直到完成
+ * 流程：
+ * 1. 校验前置条件（是否有关键帧、提示词是否为空）
+ * 2. 开启加载状态（防止重复点击）
+ * 3. 调用后端API创建视频生成任务，获取任务ID
+ * 4. 开启定时器轮询查询任务状态（每15秒查一次）
+ * 5. 任务成功：赋值视频URL、关闭轮询、提示成功、刷新积分
+ * 6. 任务失败：关闭轮询、提示错误
+ * @param index 分镜在数组中的索引（用于定位当前是哪个分镜在生成视频）
+ */
 const generateVideo = async (index) => {
+  // 1. 从响应式数组中获取当前分镜的数据
   const story = localStoryboards.value[index]
+  // 2. 前置校验1：检查当前分镜是否已生成关键帧图片
   if (!story.keyframeImageUrl) {
-    ElMessage.warning('请先生成关键帧')
-    return
+    ElMessage.warning('请先生成关键帧') // Element Plus提示组件：警告提示
+    return  // 直接返回，不执行后续逻辑
   }
+  // 3. 前置校验2：检查视频提示词是否为空（trim()去除首尾空格）
   if (!story.videoPrompt.trim()) {
     ElMessage.warning('请输入视频提示词')
     return
   }
+  // 4. 开启当前分镜的加载状态（用于控制按钮loading效果，防止重复点击）
   videoLoading.value[index] = true
 
    try {
+    // 5. 调用后端API：创建视频生成任务
+    // 传入参数：关键帧图片URL、视频提示词
     const res = await createVideoTask(story.keyframeImageUrl, story.videoPrompt)
+    // 6. 判断任务创建是否成功（后端统一返回code=200表示成功）
     if (res.data.code === 200) {
+      // 7. 从返回结果中获取任务ID（后续轮询需要用这个ID查询状态）
       const taskId = res.data.data.taskId
+      // 8. 提示用户：视频已开始生成，需要等待
       ElMessage.info('视频生成中，请稍候...')
+      // 9. 开启定时器轮询：每15秒（15000毫秒）查询一次任务状态
       const poll = setInterval(async () => {
         try {
+          // 10. 调用后端API：根据任务ID查询生成状态
           const result = await queryVideoTask(taskId)
           if (result.data.code === 200) {
+            // 11. 获取任务当前状态
+            // PENDING（排队中）→ RUNNING（处理中）→ SUCCEEDED（成功）/ FAILED（失败）
             const status = result.data.data.status
+            // 12. 状态判断1：任务生成成功
             if (status === 'SUCCEEDED') {
+              // 12.1 将生成的视频URL赋值给当前分镜（前端页面会自动显示视频）
               story.videoUrl = result.data.data.videoUrl
+              // 12.2 清除定时器（停止轮询，避免无限查询）
               clearInterval(poll)
+              // 12.3 提示用户生成成功
               ElMessage.success('视频生成成功')
+              // 12.4 关闭当前分镜的加载状态
               videoLoading.value[index] = false
-              // 刷新积分
+              // 12.5 刷新用户积分（因为生成视频消耗了积分）
               refreshPoints()
+              // 13. 状态判断2：任务生成失败
             } else if (status === 'FAILED') {
+              // 13.1 清除定时器
               clearInterval(poll)
+              // 13.2 提示用户失败原因（从后端返回的error字段获取）
               ElMessage.error('视频生成失败：' + result.data.data.error)
+              // 13.3 关闭当前分镜的加载状态
               videoLoading.value[index] = false
             }
+            // 14. 其他状态（如PENDING）：不做处理，继续下一次轮询
           }
         } catch (err) {
+          // 15. 轮询过程中出错：打印错误日志（不中断轮询，继续尝试）
           console.error('轮询出错', err)
         }
-      }, 15000)
+      }, 15000) // 15000毫秒 = 15秒
     } else {
+      // 16. 任务创建失败：提示后端返回的错误信息
       ElMessage.error(res.data.msg)
+      // 17. 关闭当前分镜的加载状态
       videoLoading.value[index] = false
     }
   } catch (err) {
+    // 18. 发起视频生成请求时出错（如网络错误）：提示用户
     ElMessage.error('发起视频生成失败')
+    // 19. 关闭当前分镜的加载状态
     videoLoading.value[index] = false
   }
 }
