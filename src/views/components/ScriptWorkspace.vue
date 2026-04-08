@@ -20,6 +20,26 @@
         发送 5分
       </el-button>
     </div>
+
+    <!-- 失败提示弹窗（必须手动关闭） -->
+     <el-dialog
+      v-model="showErrorModal"
+      title="操作失败"
+      width="400px"
+      :close-on-click-modal="false"
+      :close-on-press-escape="false"
+    >
+      <div style="font-size: 14px; padding: 10px 0;">
+        {{ errorMessage }}
+      </div>
+      <template #footer>
+        <div style="text-align: right;">
+          <el-button type="primary" @click="showErrorModal = false">
+            确定
+          </el-button>
+        </div>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -51,6 +71,10 @@ const emit = defineEmits(['script-generated'])
 // 注入父组件提供的 刷新积分 方法
 // 来自 Home.vue 里的 provide('refreshPoints', refreshPoints)
 const refreshPoints = inject('refreshPoints')
+
+// 失败弹窗相关变量
+const showErrorModal = ref(false)
+const errorMessage = ref('')
 
 /**
  * 发送请求 → 生成剧本
@@ -102,20 +126,24 @@ const send = async () => {
 
       // 向父组件抛出事件：剧本生成完成
       emit('script-generated', aiContent)
+      // 成功轻提示
+      ElMessage.success('剧本生成成功')
 
       // 调用刷新积分（生成剧本消耗了积分）
       refreshPoints()
     } 
     // 后端返回失败
     else {
-      ElMessage.error(res.data.msg)
+      errorMessage.value = res.data.msg || '生成失败，请稍后重试'
+      showErrorModal.value = true
       // 失败了 → 把刚才加进去的用户消息删掉
       messages.value.pop()
     }
   } 
   // 网络异常 / 请求失败
   catch (err) {
-    ElMessage.error('生成失败')
+    errorMessage.value = '生成失败，请检查网络后重试'
+    showErrorModal.value = true
     // 同样回退用户消息
     messages.value.pop()
   } 

@@ -81,6 +81,25 @@
         </div>
       </el-card>
     </div>
+    <!-- 失败提示弹窗（必须手动关闭） -->
+     <el-dialog
+      v-model="showErrorModal"
+      title = "操作失败"
+      width = "400px"
+      :close-on-click-modal="false"
+      :close-on-press-escape="false"
+     >
+      <div style="font-size: 14px; padding: 10px 0;">
+        {{ errorMessage }}
+      </div>
+      <template #footer>
+        <div style="text-align: right;">
+          <el-button type="primary" @click="showErrorModal = false">
+            确定 
+          </el-button>
+        </div>
+      </template>
+     </el-dialog>
   </div>
 </template>
 
@@ -100,7 +119,9 @@ const localCharacters = ref([])
 const loadingStates = ref({})
 const emit = defineEmits(['character-generated'])
 const refreshPoints = inject('refreshPoints')
-
+// 失败弹窗相关变量
+const showErrorModal = ref(false)
+const errorMessage = ref('')
 // 从拆解结果初始化本地角色列表
 const initFromProps = () => {
   if (props.characters && props.characters.length > 0) {
@@ -145,13 +166,15 @@ const removeCharacter = (index) => {
 const generateCharacterImage = async (char) => {
   // 前端校验1：角色名称不能为空
   if (!char.name.trim()) {
-    ElMessage.warning('请输入角色名')
+    errorMessage.value = '请输入角色名'
+    showErrorModal.value = true
     return
   }
 
   // 前端校验2：角色提示词不能为空（AI绘图必须有描述）
   if (!char.characterPrompt.trim()) {
-    ElMessage.warning('请输入角色提示词')
+    errorMessage.value = '请输入角色提示词'
+    showErrorModal = true
     return
   }
 
@@ -179,17 +202,19 @@ const generateCharacterImage = async (char) => {
       emit('character-generated', { name: char.name, imageUrl })
 
       // 提示用户生成成功
-      ElMessage.success(`角色 ${char.name} 图片生成成功`)
+      ElMessage.success(`角色 ${char.name} 角色图生成成功`)
 
       // 刷新用户积分（生成图片消耗积分）
       refreshPoints()
     } else {
       // 后端返回失败：提示错误信息
-      ElMessage.error(res.data.msg)
+      errorMessage.value = res.data.msg || '生成失败，请稍后重试'
+      showErrorModal.value = true
     }
   } catch (err) {
-    // 网络异常 / 请求失败
-    ElMessage.error('生成失败')
+    // 网络异常 / 请求失败：弹出强制弹窗
+    errorMessage.value = '生成失败，请检查网络后重试'
+    showErrorModal.value = true
   } finally {
     // 无论成功/失败，最终都会关闭当前角色的加载状态
     loadingStates.value[char.name] = false

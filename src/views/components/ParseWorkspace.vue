@@ -12,6 +12,26 @@
         拆解剧本 5分
       </el-button>
     </div>
+
+    <!-- 失败提示弹窗（必须手动关闭） -->
+     <el-dialog
+      v-model="showErrorModal"
+      title="操作失败"
+      width="400px"
+      :close-on-click-modal="false"
+      :close-on-press-escape="false"
+    >
+      <div style="font-size: 14px; padding: 10px 0;">
+        {{ errorMessage }}
+      </div>
+      <template #footer>
+        <div style="text-align: right;">
+          <el-button type="primary" @click="showErrorModal = false">
+            确定
+          </el-button>
+        </div>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -25,6 +45,10 @@ const loading = ref(false)
 const emit = defineEmits(['parsed'])
 const refreshPoints = inject('refreshPoints')
 
+// 失败弹窗相关变量
+const showErrorModal = ref(false)
+const errorMessage = ref('')
+
 const parse = async () => {
   if (!script.value.trim()) return
   loading.value = true
@@ -35,10 +59,12 @@ const parse = async () => {
       ElMessage.success('拆解成功')
       refreshPoints()
     } else {
-      ElMessage.error(res.data.msg)
+      errorMessage.value = res.data.msg || '拆解失败，请稍后重试'
+      showErrorModal.value = true
     }
   } catch (err) {
-    ElMessage.error('拆解失败')
+    errorMessage.value = '拆解失败，请检查网络后重试'
+    showErrorModal.value = true
   } finally {
     loading.value = false
   }

@@ -154,9 +154,9 @@
               class="prompt-input"
             />
             <div class="button-group">
-              <!-- 新增：上传测试视频按钮，v-if=false隐藏测试按钮 -->
-              <el-upload
 
+              <!-- 上传测试视频按钮，v-if=false隐藏测试按钮 -->
+              <el-upload
               v-if="false"     
                 class="upload-btn"
                 :show-file-list="false"
@@ -203,6 +203,26 @@
         style="width: 100%; height: auto;"
       ></video>
     </el-dialog>
+
+    <!-- 失败提示弹窗（必须手动关闭） -->
+    <el-dialog
+      v-model="showErrorModal"
+      title="操作失败"
+      width="400px"
+      :close-on-click-modal="false"
+      :close-on-press-escape="false"
+    >
+      <div style="font-size: 14px; padding: 10px 0;">
+        {{ errorMessage }}
+      </div>
+      <template #footer>
+        <div style="text-align: right;">
+          <el-button type="primary" @click="showErrorModal = false">
+            确定
+          </el-button>
+        </div>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -229,6 +249,10 @@ const sceneLoading = ref({})
 const keyframeLoading = ref({})
 const videoLoading = ref({})
 const playerRef = ref(null)  // 预览播放器 ref
+
+// 失败弹窗相关变量
+const showErrorModal = ref(false)
+const errorMessage = ref('')
 
 const generateId = () => Date.now() + '-' + Math.random().toString(36).substr(2, 6)
 
@@ -305,7 +329,11 @@ const generateScene = async (index) => {
   const story = localStoryboards.value[index]
 
   // 2. 前端校验：场景提示词不能为空，为空则提示并终止执行
-  if (!story.scenePrompt.trim()) return ElMessage.warning('请输入场景提示词')
+  if (!story.scenePrompt.trim()) {
+    errorMessage.value = '请输入场景提示词'
+    showErrorModal.value = true
+    return
+  }
 
   // 3. 开启当前分镜的loading状态，防止用户重复点击
   sceneLoading.value[index] = true
@@ -332,11 +360,13 @@ const generateScene = async (index) => {
       refreshPoints()
     } else {
       // 10. 后端返回失败，提示错误信息
-      ElMessage.error(res.data.msg)
+      errorMessage.value = res.data.msg || '生成失败，请稍后重试'
+      showErrorModal.value = true
     }
   } catch (err) {
     // 11. 网络异常或请求失败
-    ElMessage.error('生成失败')
+    errorMessage.value = '生成失败，请检查网络后重试'
+    showErrorModal.value = true
   } finally {
     // 12. 无论成功失败，最终都会关闭当前分镜的loading状态
     sceneLoading.value[index] = false
@@ -346,12 +376,28 @@ const generateScene = async (index) => {
 // 生成关键帧
 const generateKeyframe = async (index) => {
   const story = localStoryboards.value[index]
-  if (!story.keyframePrompt.trim()) return ElMessage.warning('请输入关键帧提示词')
-  if (!story.characters.length) return ElMessage.warning('请至少选择一个角色')
-  if (!story.sceneImageUrl) return ElMessage.warning('请先生成场景图')
+  if (!story.keyframePrompt.trim()){
+    errorMessage.value = '请输入关键帧提示词'
+    showErrorModal.value = true
+    return
+  } 
+  if (!story.characters.length) {
+    errorMessage.value = '请至少选择一个角色'
+    showErrorModal.value = true
+    return
+  }
+  if (!story.sceneImageUrl) {
+    errorMessage.value = '请先生成场景图'
+    showErrorModal.value = true
+    return
+  }
   const firstCharacter = story.characters[0]
   const characterImageUrl = props.characterImages[firstCharacter]
-  if (!characterImageUrl) return ElMessage.warning(`角色 ${firstCharacter} 尚未生成图片`)
+  if (!characterImageUrl) {
+    errorMessage.value = `角色 ${firstCharacter} 尚未生成图片`
+    showErrorModal.value = true
+    return
+  }
 
   keyframeLoading.value[index] = true
   try {
@@ -366,10 +412,12 @@ const generateKeyframe = async (index) => {
       emit('keyframe-generated', { index, imageUrl: story.keyframeImageUrl })
       refreshPoints()
     } else {
-      ElMessage.error(res.data.msg)
+      errorMessage.value = res.data.msg || '生成失败，请稍后重试'
+      showErrorModal.value = true
     }
   } catch (err) {
-    ElMessage.error('生成失败')
+    errorMessage.value = '生成失败，请检查网络后重试'
+    showErrorModal.value = true
   } finally {
     keyframeLoading.value[index] = false
   }
@@ -380,7 +428,8 @@ const handleVideoUpload = (index, options) => {
   const file = options.file
   if (!file) return
   if (!file.type.startsWith('video/')) {
-    ElMessage.error('请选择视频文件')
+    errorMessage.value = '请选择视频文件'
+    showErrorModal.value = true
     return
   }
   // 创建临时 URL
@@ -407,12 +456,14 @@ const generateVideo = async (index) => {
   const story = localStoryboards.value[index]
   // 2. 前置校验1：检查当前分镜是否已生成关键帧图片
   if (!story.keyframeImageUrl) {
-    ElMessage.warning('请先生成关键帧') // Element Plus提示组件：警告提示
-    return  // 直接返回，不执行后续逻辑
+    errorMessage.value = '请先生成关键帧'
+    showErrorModal.value = true
+    return
   }
   // 3. 前置校验2：检查视频提示词是否为空（trim()去除首尾空格）
   if (!story.videoPrompt.trim()) {
-    ElMessage.warning('请输入视频提示词')
+    errorMessage.value = '请输入视频提示词'
+    showErrorModal.value = true
     return
   }
   // 4. 开启当前分镜的加载状态（用于控制按钮loading效果，防止重复点击）
@@ -467,13 +518,15 @@ const generateVideo = async (index) => {
       }, 15000) // 15000毫秒 = 15秒
     } else {
       // 16. 任务创建失败：提示后端返回的错误信息
-      ElMessage.error(res.data.msg)
+      errorMessage.value = res.data.msg || '发起视频生成失败'
+      showErrorModal.value = true
       // 17. 关闭当前分镜的加载状态
       videoLoading.value[index] = false
     }
   } catch (err) {
     // 18. 发起视频生成请求时出错（如网络错误）：提示用户
-    ElMessage.error('发起视频生成失败')
+    errorMessage.value = '发起视频生成失败，请检查网络后重试'
+    showErrorModal.value = true
     // 19. 关闭当前分镜的加载状态
     videoLoading.value[index] = false
   }
@@ -559,7 +612,11 @@ const downloadAllVideos = async () => {
   const videoItems = localStoryboards.value
     .map((s, idx) => ({ url: s.videoUrl, idx }))
     .filter(item => item.url)
-  if (!videoItems.length) return ElMessage.warning('没有可下载的视频')
+  if (!videoItems.length){
+    errorMessage.value = '没有可下载的视频'
+    showErrorModal.value = true
+    return
+  }
 
   const zip = new JSZip()
   let successCount = 0
@@ -575,7 +632,11 @@ const downloadAllVideos = async () => {
       ElMessage.warning(`分镜${item.idx+1}视频下载失败，已跳过`)
     }
   }
-  if (successCount === 0) return ElMessage.warning('没有成功下载任何视频')
+  if (successCount === 0) {
+    errorMessage.value = '没有成功下载任何视频'
+    showErrorModal.value = true
+    return
+  }
   const content = await zip.generateAsync({ type: 'blob' })
   saveAs(content, `漫剧分镜视频_${Date.now()}.zip`)
   ElMessage.success(`已打包 ${successCount} 个视频文件`)
