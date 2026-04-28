@@ -2,7 +2,6 @@
   <div class="storyboard-workspace">
     <!-- 工具栏 -->
     <div class="storyboard-toolbar">
-      
       <div class="actions">
         <el-button type="primary" @click="previewAllVideos" :disabled="!hasVideos">
           预览所有子视频
@@ -140,8 +139,8 @@
           <!-- 视频生成 -->
           <div class="block">
             <div class="block-title">视频</div>
-            <div class="image-box">
-              <video v-if="story.videoUrl" controls style="width:100%; height:100%;">
+            <div class="image-box" >
+              <video v-if="story.videoUrl" controls style="width:100%; height:100%;" >
                 <source :src="story.videoUrl" type="video/mp4" />
               </video>
               <div v-else class="image-placeholder">未生成</div>
@@ -154,16 +153,6 @@
               class="prompt-input"
             />
             <div class="button-group">
-
-              <!-- 上传测试视频按钮，v-if=false隐藏测试按钮 -->
-              <el-upload
-              v-if="false"     
-                class="upload-btn"
-                :show-file-list="false"
-                :http-request="(options) => handleVideoUpload(idx, options)"
-              >
-                <el-button size="small" type="default">上传测试视频</el-button>
-              </el-upload>
               <el-button
                 type="primary"
                 @click="generateVideo(idx)"
@@ -193,7 +182,7 @@
     <el-dialog
       v-model="previewDialogVisible"
       title="视频预览"
-      width="25%"
+      width="50%"
       :close-on-click-modal="false"
       @close="stopPreview"
     >
@@ -204,7 +193,7 @@
       ></video>
     </el-dialog>
 
-    <!-- 失败提示弹窗（必须手动关闭） -->
+    <!-- 失败提示弹窗 -->
     <el-dialog
       v-model="showErrorModal"
       title="操作失败"
@@ -227,14 +216,14 @@
 </template>
 
 <script setup>
-import { nextTick } from 'vue'
-import { ref, computed, watch, inject } from 'vue'  // 补全 watch 导入
+import { ref, watch, onMounted, inject, computed, nextTick } from 'vue'  
 import { ElMessage } from 'element-plus'
 import JSZip from 'jszip'
 import { saveAs } from 'file-saver'
 import { generateScene as generateSceneApi } from '@/api/scene'
 import { generateKeyframe as generateKeyframeApi } from '@/api/keyframe'
 import { createVideoTask, queryVideoTask } from '@/api/video'
+import { loadLocalStoryboards, saveLocalStoryboards } from '@/utils/storage'
 
 const props = defineProps({
   storyboards: { type: Array, default: () => [] },
@@ -244,20 +233,32 @@ const props = defineProps({
 const emit = defineEmits(['keyframe-generated', 'video-generated'])
 const refreshPoints = inject('refreshPoints')
 
+// 本地分镜数据
 const localStoryboards = ref([])
 const sceneLoading = ref({})
 const keyframeLoading = ref({})
 const videoLoading = ref({})
-const playerRef = ref(null)  // 预览播放器 ref
-
 // 失败弹窗相关变量
 const showErrorModal = ref(false)
 const errorMessage = ref('')
+// 预览相关变量
+const previewDialogVisible = ref(false)
+const previewPlayerRef = ref(null)
+let previewIndex = 0
+let previewVideoList = []
+let isPreviewing = false   // 防止重复调用
 
 const generateId = () => Date.now() + '-' + Math.random().toString(36).substr(2, 6)
 
-const initFromProps = () => {
-  if (props.storyboards?.length) {
+// 初始化数据：优先从 localStorage 读取，否则根据 props 初始化
+// 初始化函数
+const initData = () => {
+  const stored = loadLocalStoryboards()
+  if (stored && stored.length > 0){
+    // 如果本地有缓存，直接使用
+    localStoryboards.value = stored
+  }else if (props.storyboards && props.storyboards.length > 0){
+    // 否则根据 props 初始化（拆解新剧本）
     localStoryboards.value = props.storyboards.map(s => ({
       id: generateId(),
       description: s.description || '',
@@ -269,7 +270,9 @@ const initFromProps = () => {
       videoPrompt: s.videoPrompt || s.detailedDescription || '',
       videoUrl: ''
     }))
+    saveLocalStoryboards(localStoryboards.value) // 立即保存
   } else {
+    // 默认新建一个空白分镜
     localStoryboards.value = [{
       id: generateId(),
       description: '',
@@ -281,9 +284,25 @@ const initFromProps = () => {
       videoPrompt: '',
       videoUrl: ''
     }]
+    saveLocalStoryboards(localStoryboards.value)
   }
 }
 
+// 监听本地分镜变化自动保存
+watch(localStoryboards, (newVal) => {
+  saveLocalStoryboards(newVal)
+}, { deep: true })
+
+// 监听 props.storyboards 变化（拆解新剧本时覆盖本地缓存）
+watch(() => props.storyboards, (newVal) => {
+  if (newVal && newVal.length > 0) {
+    // 清除旧缓存，重新初始化
+    localStorage.removeItem('manju_local_storyboards')
+    initData()
+  }
+}, { deep: true })
+
+// 添加分镜
 const addStoryboard = () => {
   localStoryboards.value.push({
     id: generateId(),
@@ -302,6 +321,7 @@ const addStoryboard = () => {
   }, 100)
 }
 
+// 删除分镜
 const removeStoryboard = (index) => {
   localStoryboards.value.splice(index, 1)
   if (localStoryboards.value.length === 0) addStoryboard()
@@ -376,11 +396,11 @@ const generateScene = async (index) => {
 // 生成关键帧
 const generateKeyframe = async (index) => {
   const story = localStoryboards.value[index]
-  if (!story.keyframePrompt.trim()){
+  if (!story.keyframePrompt.trim()) {
     errorMessage.value = '请输入关键帧提示词'
     showErrorModal.value = true
     return
-  } 
+  }
   if (!story.characters.length) {
     errorMessage.value = '请至少选择一个角色'
     showErrorModal.value = true
@@ -403,9 +423,9 @@ const generateKeyframe = async (index) => {
   try {
     const res = await generateKeyframeApi(story.keyframePrompt, characterImageUrl, story.sceneImageUrl)
     if (res.data.code === 200) {
-      let imageUrl = res.data.data;
+      let imageUrl = res.data.data
       if (typeof imageUrl === 'object' && imageUrl.imageUrl !== undefined) {
-        imageUrl = imageUrl.imageUrl;
+        imageUrl = imageUrl.imageUrl
       }
       story.keyframeImageUrl = imageUrl
       ElMessage.success('关键帧生成成功')
@@ -535,12 +555,7 @@ const generateVideo = async (index) => {
 // 预览所有视频
 const hasVideos = computed(() => localStoryboards.value.some(s => s.videoUrl))
 
-// 预览相关变量
-const previewDialogVisible = ref(false)
-const previewPlayerRef = ref(null)
-let previewIndex = 0
-let previewVideoList = []
-let isPreviewing = false   // 防止重复调用
+
 
 // 停止预览
 const stopPreview = () => {
@@ -563,10 +578,31 @@ const playPreviewVideo = () => {
     return
   }
   if (previewIndex >= previewVideoList.length) {
-    stopPreview()
+    // 播放完成：重置到第一个视频，暂停，保持弹窗打开
+    if (previewVideoList.length > 0) {
+      const firstVideoUrl = previewVideoList[0]
+      // 如果当前播放器的 src 不是第一个视频，则重新加载
+      if (previewPlayerRef.value.src !== firstVideoUrl) {
+        previewPlayerRef.value.src = firstVideoUrl
+        // 等待元数据加载完成后，将当前时间设为 0 并暂停
+        previewPlayerRef.value.onloadedmetadata = () => {
+          previewPlayerRef.value.currentTime = 0
+          previewPlayerRef.value.pause()
+        }
+      } else {
+        // 已经是第一个视频，只需重置时间和暂停
+        previewPlayerRef.value.currentTime = 0
+        previewPlayerRef.value.pause()
+      }
+    }
+    // 重置播放状态，但不关闭弹窗
+    isPreviewing = false
+    previewIndex = 0
+    // 不清空 previewVideoList，以便再次点击播放
     ElMessage.success('播放完成')
-    return
+    return  
   }
+  // 正常播放逻辑
   const currentUrl = previewVideoList[previewIndex]
   previewPlayerRef.value.src = currentUrl
   previewPlayerRef.value.play()
@@ -642,8 +678,9 @@ const downloadAllVideos = async () => {
   ElMessage.success(`已打包 ${successCount} 个视频文件`)
 }
 
-watch(() => props.storyboards, initFromProps, { immediate: true, deep: true })
-initFromProps()
+onMounted(() => {
+  initData()
+})
 </script>
 
 <style scoped>

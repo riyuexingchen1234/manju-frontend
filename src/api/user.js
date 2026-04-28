@@ -18,6 +18,10 @@ export const login = (username, password) =>{
 export const getPoints = (userId) => {
   return request.get(`/user/${userId}/points`)
 }
+// 登出接口
+export const logout = () => {
+  return request.post('/user/logout')
+}
 
 // 默认导出 request 实例，供其他模块使用
 export default request

@@ -39,6 +39,7 @@
           :characters="characters"
           :characterImages="characterImages"
           @character-generated="handleCharacterGenerated"
+          @update-characters="(newList) => characters = newList"
         />
       </section>
 
@@ -82,12 +83,17 @@
 </template>
 
 <script setup>
-import { ref, onMounted,provide } from 'vue' // 导入 Vue3 组合式API ref: 定义响应式变量 provide: 向子组件提供方法（依赖注入）
+import { ref, onMounted,provide,computed,watch } from 'vue' // 导入 Vue3 组合式API ref: 定义响应式变量 provide: 向子组件提供方法（依赖注入）
 import { useRouter } from 'vue-router'
-import { getPoints } from '@/api/user'  // 导入获取用户积分的后端接口
+import { getPoints,logout as logoutApi } from '@/api/user'  // 导入获取用户积分的后端接口
 import { searchNovel as searchNovelApi, getRank, analyzeWork } from '@/api/assist'
 import { ElMessage } from 'element-plus'
-import { computed } from 'vue'
+import {
+  loadCharacters, saveCharacters,
+  loadStoryboards, saveStoryboards,
+  loadCharacterImages, saveCharacterImages,
+  clearAllStorage
+} from '@/utils/storage'
 
 import ScriptWorkspace from './components/ScriptWorkspace.vue'
 import ParseWorkspace from './components/ParseWorkspace.vue'
@@ -95,17 +101,24 @@ import CharacterWorkspace from './components/CharacterWorkspace.vue'
 import StoryboardWorkspace from './components/StoryboardWorkspace.vue'
 
 const router = useRouter()
+// ========== 用户相关 ==========
 // 从 localStorage 中读取登录后的用户信息
 // 如果没有用户信息（未登录），则默认赋值为空对象 {}，避免报错
 const user = JSON.parse(localStorage.getItem('user') || '{}')
 const username = ref(user.username || '')
 const points = ref(0)   // 定义响应式变量：存储用户当前积分
 
-// 全局状态
-const characters = ref([])                // [{ name, description, characterPrompt }]
-const storyboards = ref([])               // 分镜列表，由拆解剧本填充
-const characterImages = ref({})           // { 角色名: 图片URL }
+// ========== 从 localStorage 初始化数据 ==========
+const characters = ref(loadCharacters())
+const storyboards = ref(loadStoryboards())
+const characterImages = ref(loadCharacterImages())
 
+// ========== 监听变化自动保存 ==========
+watch(characters, (newVal) => saveCharacters(newVal),{deep:true})
+watch(storyboards, (newVal) => saveStoryboards(newVal), { deep:true})
+watch(characterImages, (newVal) => saveCharacterImages(newVal), { deep:true})
+
+// ========== 积分相关 ==========
 /**
  * 获取用户积分方法
  * 作用：从后端查询当前用户的最新积分，并更新到页面显示
@@ -139,18 +152,7 @@ const refreshPoints = () => {
  */
 provide('refreshPoints', refreshPoints)
 
-// 退出登录
-const logout = () => {
-  localStorage.removeItem('user')
-  router.push('/login')
-}
-
-// 滚动到指定区域
-const scrollTo = (id) => {
-  const element = document.getElementById(id)
-  if (element) element.scrollIntoView({ behavior: 'smooth' })
-}
-
+// ========== 拆解与角色生成回调 ==========
 // 处理拆解结果
 const handleParsed = (data) => {
   characters.value = data.characters || []
@@ -163,6 +165,27 @@ const handleParsed = (data) => {
 // 处理角色生成
 const handleCharacterGenerated = ({ name, imageUrl }) => {
   characterImages.value[name] = imageUrl
+}
+
+// ========== 退出登录 ==========
+const logout = async () => {
+  try{
+    await logoutApi()       // 调用后端登出接口，销毁 Session
+  }catch (err){
+    console.error('登出接口调用失败',err)
+    // 即使后端调用失败，也要清除前端状态，避免卡在登录态
+  }finally{
+    localStorage.removeItem('user')
+    clearAllStorage()          // 清除所有缓存数据
+    router.push('/login')
+  }
+}
+
+// ========== 辅助功能 ==========
+// 滚动到指定区域
+const scrollTo = (id) => {
+  const element = document.getElementById(id)
+  if (element) element.scrollIntoView({ behavior: 'smooth' })
 }
 
 // 页面加载时获取积分

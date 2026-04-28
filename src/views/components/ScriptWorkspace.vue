@@ -47,13 +47,18 @@
 // 导入Vue3组合式API
 // ref: 定义响应式数据
 // inject: 注入父组件提供的方法（这里用来刷新积分）
-import { ref, inject } from 'vue'
-
+import { ref, inject, watch } from 'vue'
 // 导入后端剧本生成接口
 import { generateScript } from '@/api/script'
-
 // 导入Element Plus消息提示组件
 import { ElMessage } from 'element-plus'
+import { loadScriptMessages, saveScriptMessages } from '@/utils/storage'
+
+// 从 localStorage 加载历史消息 对话消息历史：保存用户 + AI的对话记录
+const messages = ref(loadScriptMessages())
+
+// 监听消息变化自动保存
+watch(messages, (newVal) => saveScriptMessages(newVal), { deep: true })
 
 // 输入框中的提示词（用户输入的内容）
 const prompt = ref('')
@@ -61,8 +66,6 @@ const prompt = ref('')
 // 加载状态：控制按钮loading，防止重复提交
 const loading = ref(false)
 
-// 对话消息历史：保存用户 + AI的对话记录
-const messages = ref([])
 
 // 定义事件抛出：告诉父组件剧本生成完成了
 // 父组件可以监听 script-generated 事件拿到生成的剧本

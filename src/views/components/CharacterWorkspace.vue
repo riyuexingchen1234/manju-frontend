@@ -2,15 +2,16 @@
   <div class="character-workspace">
     <div class="character-grid">
       <el-card
-        v-for="(char, idx) in localCharacters"
-        :key="char.id"
+        v-for="(char, idx) in props.characters"
+        :key="char.id || idx"
         class="character-card"
         shadow="hover"
       >
         <template #header>
           <div class="card-header">
             <el-input
-              v-model="char.name"
+              :value="char.name"
+              @input="updateCharacter(idx, 'name', $event)"
               placeholder="角色名"
               size="small"
               style="width: 120px"
@@ -29,9 +30,9 @@
           <!-- 图片展示区 -->
           <div class="image-area">
             <el-image
-              v-if="characterImages[char.name]"
-              :src="characterImages[char.name]"
-              :preview-src-list="[characterImages[char.name]]"  
+              v-if="props.characterImages[char.name]"
+              :src="props.characterImages[char.name]"
+              :preview-src-list="[props.characterImages[char.name]]"  
               fit="cover"
               class="character-image"
             />
@@ -43,7 +44,8 @@
 
           <!-- 提示词输入框 -->
           <el-input
-            v-model="char.characterPrompt"
+            :value="char.characterPrompt"
+            @input="updateCharacter(idx, 'characterPrompt', $event)"
             type="textarea"
             :rows="4"
             placeholder="请输入角色提示词"
@@ -52,7 +54,7 @@
 
           <!-- 按钮组 -->
           <div class="button-group">
-            <!-- 上传角色图按钮（临时模拟） -->
+            <!-- 上传角色图按钮 -->
             <el-upload
               class="upload-btn"
               :show-file-list="false"
@@ -63,7 +65,7 @@
             <!-- 生成角色图按钮 -->
             <el-button
               type="primary"
-              @click="generateCharacterImage(char)"
+              @click="generateCharacterImage(char, idx)"
               :loading="loadingStates[char.name]"
               size="small"
             >
@@ -84,76 +86,82 @@
     <!-- 失败提示弹窗（必须手动关闭） -->
      <el-dialog
       v-model="showErrorModal"
-      title = "操作失败"
-      width = "400px"
+      title="操作失败"
+      width="400px"
       :close-on-click-modal="false"
       :close-on-press-escape="false"
-     >
+    >
       <div style="font-size: 14px; padding: 10px 0;">
         {{ errorMessage }}
       </div>
       <template #footer>
-        <div style="text-align: right;">
-          <el-button type="primary" @click="showErrorModal = false">
-            确定 
-          </el-button>
-        </div>
+        <el-button type="primary" @click="showErrorModal = false">确定</el-button>
       </template>
-     </el-dialog>
+    </el-dialog>
   </div>
 </template>
 
 <script setup>
-import { ref, watch, inject } from 'vue'
+import { ref, watch, inject,onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { generateCharacter } from '@/api/character'
 
-const generateId = () => Date.now() + '-' + Math.random().toString(36).substr(2, 6)
 const props = defineProps({
-  characters: Array,
+  characters: Array,    // 从父组件接收角色列表
   characterImages: Object,
 })
-// 本地角色列表
-const localCharacters = ref([])
+const emit = defineEmits(['character-generated','update-characters'])
+
+// ========== 确保至少有一个有效角色卡片 ==========
+const ensureAtLeastOneCharacter = () => {
+  if (!props.characters || props.characters.length === 0) {
+    emit('update-characters', [{ name: '', characterPrompt: '' }])
+  } else {
+    const hasInvalid = props.characters.some(c => c.name === undefined || c.characterPrompt === undefined)
+    if (hasInvalid) {
+      const valid = props.characters.filter(c => c.name !== undefined && c.characterPrompt !== undefined)
+      if (valid.length === 0) {
+        emit('update-characters', [{ name: '', characterPrompt: '' }])
+      } else {
+        emit('update-characters', valid)
+      }
+    }
+  }
+}
+watch(() => props.characters, ensureAtLeastOneCharacter, { immediate: true, deep: true })
+onMounted(ensureAtLeastOneCharacter)
+
+const refreshPoints = inject('refreshPoints')
 // 加载状态
 const loadingStates = ref({})
-const emit = defineEmits(['character-generated'])
-const refreshPoints = inject('refreshPoints')
 // 失败弹窗相关变量
 const showErrorModal = ref(false)
 const errorMessage = ref('')
-// 从拆解结果初始化本地角色列表
-const initFromProps = () => {
-  if (props.characters && props.characters.length > 0) {
-    localCharacters.value = props.characters.map(char => ({
-      id: generateId(),
-      name: char.name,
-      characterPrompt: char.characterPrompt || ''
-    }))
-  } else {
-    localCharacters.value = [{
-      id: generateId(),
-      name: '',
-      characterPrompt: ''
-    }]
-  }
+
+// 更新角色字段
+const updateCharacter = (index, field, value) => {
+  const newList = [...props.characters]
+  newList[index] = { ...newList[index], [field]: value }
+  emit('update-characters', newList)
 }
 
 // 添加新角色
 const addCharacter = () => {
-  localCharacters.value.push({
-    id: generateId(),
-    name: `新角色${localCharacters.value.length + 1}`,
-    characterPrompt: ''
-  })
+  const newName = `新角色${props.characters.length + 1}`
+  const newCharacter = { name: newName, characterPrompt: '' }
+  const newList = [...props.characters, newCharacter]
+  emit('update-characters', newList)
 }
 
 // 删除角色
 const removeCharacter = (index) => {
-  localCharacters.value.splice(index, 1)
-  if (localCharacters.value.length === 0) {
-    addCharacter()
+  const newList = [...props.characters]
+  newList.splice(index, 1)
+  if (newList.length === 0) {
+    // 保持至少一个空白角色卡片
+    newList.push({ name: '', characterPrompt: '' })
   }
+  emit('update-characters', newList)
 }
 
 /**
@@ -163,7 +171,7 @@ const removeCharacter = (index) => {
  *
  * @param char - 当前角色对象（包含 name 角色名、characterPrompt 角色提示词）
  */
-const generateCharacterImage = async (char) => {
+const generateCharacterImage = async (char, index) => {
   // 前端校验1：角色名称不能为空
   if (!char.name.trim()) {
     errorMessage.value = '请输入角色名'
@@ -174,7 +182,7 @@ const generateCharacterImage = async (char) => {
   // 前端校验2：角色提示词不能为空（AI绘图必须有描述）
   if (!char.characterPrompt.trim()) {
     errorMessage.value = '请输入角色提示词'
-    showErrorModal = true
+    showErrorModal.value = true
     return
   }
 
@@ -254,13 +262,6 @@ const handleCustomUpload = (char, options) => {
 //   }
 // }
 
-// 监听拆解结果变化
-watch(() => props.characters, (newVal) => {
-  initFromProps()
-}, { immediate: true, deep: true })
-
-// 初始化
-initFromProps()
 </script>
 
 <style scoped>
