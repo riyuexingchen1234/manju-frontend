@@ -90,7 +90,7 @@
                 :show-file-list="false"
                 :http-request="(options) => handleSceneUpload(idx, options)"
               >
-                <el-button size="small" type="default">上传场景图</el-button>
+                <el-button size="small" type="default">本地上传</el-button>
               </el-upload>
               <el-button
                 type="primary"
@@ -98,7 +98,7 @@
                 :loading="sceneLoading[idx]"
                 size="small"
               >
-                生成场景图 10分
+                生成场景 10分
               </el-button>
             </div>
           </div>
@@ -127,12 +127,12 @@
               @click="generateKeyframe(idx)"
               :loading="keyframeLoading[idx]"
               size="small"
-              :disabled="!story.sceneImageUrl || story.characters.length === 0"
+              :disabled="!story.sceneImageUrl"
             >
               生成关键帧 10分
             </el-button>
-            <div class="hint" v-if="!story.sceneImageUrl || story.characters.length === 0">
-              需场景图+角色
+            <div class="hint" v-if="!story.sceneImageUrl">
+              需场景图
             </div>
           </div>
 
@@ -175,7 +175,7 @@
     </div>
 
     <div class="add-button-container">
-      <el-button type="primary" @click="addStoryboard" class="add-storyboard-btn">添加分镜</el-button>
+      <el-button  @click="addStoryboard" class="add-storyboard-btn">+ 添加分镜</el-button>
     </div>
 
     <!-- 视频预览对话框 -->
@@ -230,7 +230,7 @@ const props = defineProps({
   characterImages: { type: Object, default: () => ({}) }
 })
 
-const emit = defineEmits(['keyframe-generated', 'video-generated'])
+const emit = defineEmits(['keyframe-generated', 'video-generated', 'update:storyboards'])
 const refreshPoints = inject('refreshPoints')
 
 // 本地分镜数据
@@ -291,6 +291,7 @@ const initData = () => {
 // 监听本地分镜变化自动保存
 watch(localStoryboards, (newVal) => {
   saveLocalStoryboards(newVal)
+  emit('update:storyboards', newVal)
 }, { deep: true })
 
 // 监听 props.storyboards 变化（拆解新剧本时覆盖本地缓存）
@@ -359,8 +360,8 @@ const generateScene = async (index) => {
   sceneLoading.value[index] = true
 
   try {
-    // 4. 调用后端API，传入场景提示词，请求生成场景图
-    const res = await generateSceneApi(story.scenePrompt)
+    // 4. 调用后端API，传入场景提示词 + 风格声明，请求生成场景图
+    const res = await generateSceneApi(story.scenePrompt, props.styleDeclaration)
 
     // 5. 判断接口返回状态：200 表示生成成功
     if (res.data.code === 200) {
@@ -401,27 +402,24 @@ const generateKeyframe = async (index) => {
     showErrorModal.value = true
     return
   }
-  if (!story.characters.length) {
-    errorMessage.value = '请至少选择一个角色'
-    showErrorModal.value = true
-    return
-  }
   if (!story.sceneImageUrl) {
     errorMessage.value = '请先生成场景图'
     showErrorModal.value = true
     return
   }
-  const firstCharacter = story.characters[0]
-  const characterImageUrl = props.characterImages[firstCharacter]
-  if (!characterImageUrl) {
-    errorMessage.value = `角色 ${firstCharacter} 尚未生成图片`
+  // 收集所有选中角色的图片URL（支持多角色关键帧生成）
+  const characterImageUrls = story.characters
+    .map(name => props.characterImages[name])
+    .filter(Boolean)
+  if (story.characters.length > 0 && characterImageUrls.length === 0) {
+    errorMessage.value = '请先生成角色图片'
     showErrorModal.value = true
     return
   }
 
   keyframeLoading.value[index] = true
   try {
-    const res = await generateKeyframeApi(story.keyframePrompt, characterImageUrl, story.sceneImageUrl)
+    const res = await generateKeyframeApi(story.keyframePrompt, characterImageUrls, story.sceneImageUrl)
     if (res.data.code === 200) {
       let imageUrl = res.data.data
       if (typeof imageUrl === 'object' && imageUrl.imageUrl !== undefined) {
@@ -499,10 +497,18 @@ const generateVideo = async (index) => {
       const taskId = res.data.data.taskId
       // 8. 提示用户：视频已开始生成，需要等待
       ElMessage.info('视频生成中，请稍候...')
-      // 9. 开启定时器轮询：每15秒（15000毫秒）查询一次任务状态
+      // 轮询：每15秒查询一次，最多80次（约20分钟）
+      let pollCount = 0
+      const MAX_POLL_COUNT = 80
       const poll = setInterval(async () => {
+        pollCount++
+        if (pollCount >= MAX_POLL_COUNT) {
+          clearInterval(poll)
+          videoLoading.value[index] = false
+          ElMessage.error('视频生成超时，请稍后重试')
+          return
+        }
         try {
-          // 10. 调用后端API：根据任务ID查询生成状态
           const result = await queryVideoTask(taskId)
           if (result.data.code === 200) {
             // 11. 获取任务当前状态
@@ -751,7 +757,7 @@ onMounted(() => {
   text-align: center;
 }
 .add-storyboard-btn{
-  display: inline-flex;
+  display:inline-flex;
   align-items: center;
   justify-content: center;
 }
@@ -765,4 +771,5 @@ onMounted(() => {
   flex: 1;
   min-width: 0;
 }
+
 </style>

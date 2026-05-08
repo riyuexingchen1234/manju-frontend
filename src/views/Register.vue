@@ -1,122 +1,125 @@
 <template>
   <div class="login-container">
-    <!-- 返回首页 -->
     <button class="back-home" @click="goHome">
       <i class="fa fa-arrow-left"></i> 返回首页
     </button>
 
     <div class="login-card">
-      <h1 class="login-title gradient-text">欢迎登录</h1>
-      <p class="login-subtitle">登录您的 Manju 账户继续创作</p>
+      <h1 class="login-title gradient-text">创建账号</h1>
+      <p class="login-subtitle">创建您的 Manju 账户开始创作</p>
 
-      <el-form :model="form" label-width="0">
-        <el-form-item>
+      <el-form ref="formRef" :model="form" :rules="rules" label-width="0">
+        <el-form-item prop="username">
           <el-input
             v-model="form.username"
-            placeholder="邮箱 / 用户名"
+            placeholder="用户名"
             class="login-input"
           />
         </el-form-item>
-        <el-form-item>
+        <el-form-item prop="password">
           <el-input
             v-model="form.password"
             type="password"
             show-password
             placeholder="密码"
             class="login-input"
-            @keyup.enter="handleLogin"
+          />
+        </el-form-item>
+        <el-form-item prop="confirmPassword">
+          <el-input
+            v-model="form.confirmPassword"
+            type="password"
+            show-password
+            placeholder="确认密码"
+            class="login-input"
           />
         </el-form-item>
 
-        <div class="form-options">
-          <el-checkbox v-model="rememberMe">记住我</el-checkbox>
-          <el-link type="primary" :underline="false" class="forgot-link" @click="showForgotPassword = true">忘记密码？</el-link>
-        </div>
-
         <el-button
           class="btn-gradient btn-login"
-          @click="handleLogin"
+          @click="handleRegister"
           :loading="loading"
         >
-          登录
+          注册
         </el-button>
 
         <div class="register-tip">
-          还没有账号？<el-link type="primary" :underline="false" @click="$router.push('/register')">立即注册</el-link>
+          已有账号？<el-link type="primary" :underline="false" @click="goLogin">立即登录</el-link>
         </div>
       </el-form>
     </div>
   </div>
-  <el-dialog
-    v-model="showForgotPassword"
-    title = "忘记密码"
-    width = "300px"
-    :close-on-click-modal = "true"
-  >
-    <p style="text-align: center; color: #666; margin: 0; ">请联系管理员，QQ：36173800</p>
-  </el-dialog>
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { login } from '@/api/user'
 import { ElMessage } from 'element-plus'
+import { register } from '@/api/user'
 
 const router = useRouter()
-
-// 表单数据
+const formRef = ref()
+const loading = ref(false)
 const form = ref({
   username: '',
-  password: ''
+  password: '',
+  confirmPassword: ''
 })
 
-const loading = ref(false)
-const rememberMe = ref(false)
-const showForgotPassword = ref(false)
+const rules = {
+  username: [
+    { required: true, message: '请输入用户名', trigger: 'blur' },
+    { min: 3, max: 20, message: '用户名长度需在3-20个字符', trigger: 'blur' }
+  ],
+  password: [
+    { required: true, message: '请输入密码', trigger: 'blur' },
+    { min: 6, message: '密码至少6位', trigger: 'blur' }
+  ],
+  confirmPassword: [
+    { required: true, message: '请确认密码', trigger: 'blur' },
+    {
+      validator: (rule, value, callback) => {
+        if (value !== form.value.password) {
+          callback(new Error('两次密码不一致'))
+        } else {
+          callback()
+        }
+      },
+      trigger: 'blur'
+    }
+  ]
+}
 
-// 初始化：如果之前有记住的用户名，自动回填
-onMounted(() => {
-  const savedUser = localStorage.getItem('remember_username')
-  if (savedUser) {
-    form.value.username = savedUser
-    rememberMe.value = true
+const handleRegister = async () => {
+  try {
+    await formRef.value.validate()
+  } catch (e) {
+    return
   }
-})
+
+  loading.value = true
+  try {
+    const res = await register(form.value.username, form.value.password)
+    if (res.data.code === 200) {
+      ElMessage.success('注册成功，请登录')
+      setTimeout(() => router.push('/login'), 1500)
+    }else {
+      ElMessage.error(res.data.msg || '注册失败')
+    }
+  } catch (error) {
+    const msg = error?.response?.data?.msg || error.message || '注册失败，请重试'
+    ElMessage.error(msg)
+  } finally {
+    loading.value = false
+  }
+}
 
 const goHome = () => {
   router.push('/')
 }
 
-const handleLogin = async () => {
-  if (!form.value.username || !form.value.password) {
-    ElMessage.warning('请输入用户名和密码')
-    return
-  }
-
-  // 记住用户名（仅在勾选时）
-  if (rememberMe.value) {
-    localStorage.setItem('remember_username', form.value.username)
-  } else {
-    localStorage.removeItem('remember_username')
-  }
-
-  loading.value = true
-  try {
-    const res = await login(form.value.username, form.value.password)
-    if (res.data.code === 200) {
-      ElMessage.success('登录成功')
-      localStorage.setItem('user', JSON.stringify(res.data.data))
-      router.push('/home')
-    } else {
-      ElMessage.error(res.data.msg)
-    }
-  } catch (err) {
-    ElMessage.error('网络错误，请稍后重试')
-    console.error(err)
-  } finally {
-    loading.value = false
-  }
+const goLogin = () => {
+  router.push('/login')
 }
 </script>
 
@@ -199,14 +202,14 @@ const handleLogin = async () => {
   margin-bottom: 32px;
 }
 
-/* 输入框样式 */
+/* 输入框样式 - 系统性：直接样式化 wrapper */
 .login-input :deep(.el-input__wrapper) {
   border: 1px solid #e5e7eb !important;
   border-radius: 8px !important;
   padding: 0 12px !important;
   height: 44px !important;
   box-shadow: none !important;
-  transition: border-color 0.2s,box-shadow 0.2s !important;
+  transition: border-color 0.2s, box-shadow 0.2s !important;
 }
 .login-input :deep(.el-input__wrapper:focus-within),
 .login-input :deep(.el-input.is-focused .el-input__wrapper) {

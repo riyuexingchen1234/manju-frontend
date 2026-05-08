@@ -10,6 +10,7 @@ import Home from '@/views/Home.vue'
 const routes = [
     { path: '/', component: Home },           // 根路径直接进入主页
     { path: '/login', component: Login },
+    { path: '/register', component: () => import('@/views/Register.vue') },
     { path: '/home', component: Home }        // 保留 /home 也可以访问
 ]
 // 创建路由实例

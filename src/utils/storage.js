@@ -1,7 +1,6 @@
 const STORAGE_KEYS = {
     SCRIPT_MESSAGES: 'manju_script_messages',
     CHARACTERS: 'manju_characters',
-    STORYBOARDS: 'manju_storyboards',
     CHARACTER_IMAGES: 'manju_character_images',
     LOCAL_STORYBOARDS: 'manju_local_storyboards'
 }
@@ -20,14 +19,6 @@ export const saveCharacters = (characters) => {
 export const loadCharacters = () =>{
     const data = localStorage.getItem(STORAGE_KEYS.CHARACTERS)
     return data ? JSON.parse(data) : []
-}
-
-export const saveStoryboards = (storyboards) => {
-  localStorage.setItem(STORAGE_KEYS.STORYBOARDS, JSON.stringify(storyboards))
-}
-export const loadStoryboards = () => {
-  const data = localStorage.getItem(STORAGE_KEYS.STORYBOARDS)
-  return data ? JSON.parse(data) : []
 }
 
 export const saveCharacterImages = (images) => {

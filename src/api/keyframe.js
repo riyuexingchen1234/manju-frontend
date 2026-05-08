@@ -1,5 +1,5 @@
 import request from './user'
 
-export const generateKeyframe = (storyboardDescription, characterImageUrl, sceneImageUrl) => {
-  return request.post('/keyframe/generate', { storyboardDescription, characterImageUrl, sceneImageUrl })
+export const generateKeyframe = (storyboardDescription, characterImageUrls, sceneImageUrl) => {
+  return request.post('/keyframe/generate', { storyboardDescription, characterImageUrls, sceneImageUrl })
 }

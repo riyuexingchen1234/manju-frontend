@@ -21,6 +21,7 @@
               size="small"
               icon="Delete"
               circle
+              class="delete-btn-sm"
               @click="removeCharacter(idx)"
             />
           </div>
@@ -37,7 +38,6 @@
               class="character-image"
             />
             <div v-else class="image-placeholder">
-              <el-icon><Picture /></el-icon>
               <span>未生成</span>
             </div>
           </div>
@@ -60,16 +60,16 @@
               :show-file-list="false"
               :http-request="(options) => handleCustomUpload(char, options)"
             >
-              <el-button size="small" type="default">上传角色图</el-button>
+              <el-button size="small" type="default">本地上传</el-button>
             </el-upload>
             <!-- 生成角色图按钮 -->
             <el-button
-              type="primary"
+              class="btn-gradient btn-character" 
               @click="generateCharacterImage(char, idx)"
               :loading="loadingStates[char.name]"
               size="small"
             >
-              生成角色图 10分
+              生成 10分
             </el-button>
           </div>
         </div>
@@ -105,10 +105,12 @@
 import { ref, watch, inject,onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { generateCharacter } from '@/api/character'
+import { Plus } from '@element-plus/icons-vue'
 
 const props = defineProps({
   characters: Array,    // 从父组件接收角色列表
   characterImages: Object,
+  styleDeclaration: { type: String, default: '' },  // 全局风格声明
 })
 const emit = defineEmits(['character-generated','update-characters'])
 
@@ -191,8 +193,8 @@ const generateCharacterImage = async (char, index) => {
   loadingStates.value[char.name] = true
 
   try {
-    // 调用后端接口：传入角色名 + 角色提示词，请求AI生成图片
-    const res = await generateCharacter(char.name, char.characterPrompt)
+    // 调用后端接口：传入角色名 + 角色提示词 + 风格声明，请求AI生成图片
+    const res = await generateCharacter(char.name, char.characterPrompt, props.styleDeclaration)
 
     // 判断后端返回状态：200 表示生成成功
     if (res.data.code === 200) {
@@ -339,5 +341,32 @@ const handleCustomUpload = (char, options) => {
   height: 100%;
   gap: 12px;
   color: #409eff;
+}
+
+.delete-btn-sm{
+  width: 18px !important;
+  height: 18px !important;
+  padding: 0 !important;
+}
+.delete-btn-sm .el-icon {
+  font-size: 10px !important;
+}
+
+.btn-gradient {
+  border: none !important;
+  color: white !important;
+  font-weight: 600 !important;
+  border-radius: 999px !important;
+  padding: none !important;
+  transition: all 0.2s ease !important;
+}
+/* 角色模块 - 绿青主题 */
+.btn-character {
+  background: linear-gradient(135deg, #22c55e, #14b8a6) !important;
+  box-shadow: 0 4px 12px rgba(34,197,94,0.3) !important;
+}
+.btn-character:hover {
+  transform: scale(1.04) !important;
+  box-shadow: 0 6px 20px rgba(34,197,94,0.4) !important;
 }
 </style>

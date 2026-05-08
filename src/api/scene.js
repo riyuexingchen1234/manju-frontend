@@ -1,5 +1,5 @@
 import request from './user'
 
-export const generateScene = (scenePrompt) => {
-  return request.post('/scene/generate', { scenePrompt })
+export const generateScene = (scenePrompt, styleDeclaration = '') => {
+  return request.post('/scene/generate', { scenePrompt, styleDeclaration })
 }

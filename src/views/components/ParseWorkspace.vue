@@ -8,8 +8,8 @@
         placeholder="请粘贴你的单集剧本正文..."
         @keydown.ctrl.enter="parse"
       />
-      <el-button type="primary" @click="parse" :loading="loading" style="margin-top: 10px">
-        拆解剧本 5分
+      <el-button class="btn-gradient btn-parse" @click="parse" :loading="loading" style="margin-top: 10px">
+        拆解 5分
       </el-button>
     </div>
 
@@ -78,6 +78,28 @@ const parse = async () => {
   gap: 20px;
 }
 .input-area {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
   width: 100%;
+}
+
+.btn-gradient {
+  align-self: flex-end;
+  border: none !important;
+  color: white !important;
+  font-weight: 600 !important;
+  border-radius: 999px !important;
+  padding: 10px 28px !important;
+  transition: all 0.2s ease !important;
+}
+/* 拆解模块 - 蓝青主题 */
+.btn-parse {
+  background: linear-gradient(135deg, #3b82f6, #22d3ee) !important;
+  box-shadow: 0 4px 12px rgba(59,130,246,0.3) !important;
+}
+.btn-parse:hover {
+  transform: scale(1.04) !important;
+  box-shadow: 0 6px 20px rgba(59,130,246,0.4) !important;
 }
 </style>

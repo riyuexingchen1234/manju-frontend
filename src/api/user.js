@@ -23,5 +23,10 @@ export const logout = () => {
   return request.post('/user/logout')
 }
 
+// 用户注册接口
+ export const register = (username, password) => {
+  return request.post('/user/register', { username, password })
+ }
+
 // 默认导出 request 实例，供其他模块使用
 export default request
