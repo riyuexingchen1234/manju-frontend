@@ -15,8 +15,8 @@ export const login = (username, password) =>{
     })
 }
 // 查询积分
-export const getPoints = (userId) => {
-  return request.get(`/user/${userId}/points`)
+export const getPoints = () => {
+  return request.get('/user/points')
 }
 // 登出接口
 export const logout = () => {

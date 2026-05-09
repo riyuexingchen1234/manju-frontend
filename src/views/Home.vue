@@ -399,7 +399,7 @@ watch(characterImages, (newVal) => saveCharacterImages(newVal), { deep: true })
 const fetchPoints = async () => {
   if (!user.id) return
   try {
-    const res = await getPoints(user.id)
+    const res = await getPoints()
     if (res.data.code === 200) {
       points.value = res.data.data
     }
