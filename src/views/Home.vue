@@ -31,11 +31,11 @@
             <i class="fa fa-lightbulb-o"></i> 灵感助手
           </button>
           <template v-if="user.id">
-            <div class="user-menu" @mouseenter="showUserCard = true" @mouseleave="showUserCard = false">
+            <div class="user-menu" ref="userMenuRef">
             <!-- 用户图标（首字母） -->
-             <div class="user-avatar">{{ username.charAt(0) }}</div>
-             <!-- 悬停卡片 -->
-              <div v-show="showUserCard" class="user-card">
+             <div class="user-avatar" @click.stop="toggleUserCard">{{ username.charAt(0) }}</div>
+             <!-- 点击卡片 -->
+              <div v-show="showUserCard" class="user-card" @click.stop>
                 <div class="user-card-header">
                   <span class="user-card-name">{{ username }}</span>
                   <button class="user-card-logout" @click="logout">退出</button>
@@ -53,8 +53,11 @@
                     class="user-card-history-item"
                     :class="{ 'history-failed': item.status === 'failed','history-pending' : item.status === 'pending' }"
                   >
-                    <span class="history-tool">{{ formatToolName(item.toolType) }}</span>
-                    <span class="history-preview">{{ item.inputPreview }}</span>
+                    <span class="history-tool">{{ formatToolName(item.tool) }}</span>
+                    <!-- 优先显示AI生成的结果，没有则显示用户输入 -->
+                    <span v-if="item.resultText" class="history-preview">{{ formatResultText(item.tool, item.resultText) }}</span>
+                    <span v-else-if="item.resultUrl" class="history-preview">查看图片/视频</span>
+                    <span v-else class="history-preview">{{ item.inputPreview }}</span>
                     <span class="history-status">{{ item.status === 'pending' ? '生成中' : '' }}</span>
                     <span class="history-time">{{ formatTime(item.createdAt) }}</span>
                   </div>
@@ -67,8 +70,8 @@
             </div>
           </template>
           <template v-else>
-            <el-button type="text" class="login-btn" @click="router.push('/register')">注册</el-button>
-            <el-button type="text" class="login-btn" @click="router.push('/login')">登录</el-button>
+            <el-button type="text" class="login-btn" @click="goToRegister">注册</el-button>
+            <el-button type="text" class="login-btn" @click="goToLogin">登录</el-button>
           </template>
         </div>
       </div>
@@ -91,10 +94,10 @@
           <button v-if="user.id" class="btn-start" @click="scrollTo('script')">
             开始创作 <i class="fa fa-arrow-right"></i>
           </button>
-          <button v-else class="btn-start" @click="router.push('/login')">
+          <button v-else class="btn-start" @click="goToLogin">
             立即登录 
           </button>
-          <button class="btn-tutorial">查看教程</button>
+          <button class="btn-tutorial" @click="showTutorial = true">查看教程</button>
         </div>
       </div>
     </section>
@@ -110,10 +113,10 @@
             </div>
             <h2 class="ws-title gradient-text gradient-script">剧本生成</h2>
             <span class="ws-desc">输入关键词，AI自动生成完整的短剧剧本</span>
-            <span class="ws-note">⚠️ 内容不会自动保存，请及时下载</span>
+            <span class="ws-note">⚠️ 内容不会长期保存，请及时下载</span>
           </div>
           <div class="workspace-body">
-            <ScriptWorkspace />
+            <ScriptWorkspace @script-generated="handleScriptGenerated" />
           </div>
         </section>
 
@@ -125,7 +128,7 @@
             </div>
             <h2 class="ws-title gradient-text gradient-parse">拆解剧本</h2>
             <span class="ws-desc">粘贴你的剧本，AI自动拆解出角色、场景、分镜</span>
-            <span class="ws-note">⚠️ 内容不会自动保存，请及时下载</span>
+            <span class="ws-note">⚠️ 内容不会长期保存，请及时下载</span>
           </div>
           <div class="workspace-body">
             <ParseWorkspace @parsed="handleParsed" />
@@ -140,7 +143,7 @@
             </div>
             <h2 class="ws-title gradient-text gradient-character">角色生成</h2>
             <span class="ws-desc">根据角色描述，AI生成统一风格的角色形象图</span>
-            <span class="ws-note">⚠️ 内容不会自动保存，请及时下载</span>
+            <span class="ws-note">⚠️ 内容不会长期保存，请及时下载</span>
           </div>
           <div class="workspace-body">
             <CharacterWorkspace
@@ -160,14 +163,14 @@
             </div>
             <h2 class="ws-title gradient-text gradient-storyboard">分镜生成</h2>
             <span class="ws-desc">根据剧本和角色，AI自动生成分镜脚本和场景图</span>
-            <span class="ws-note">⚠️ 内容不会自动保存，请及时下载</span>
+            <span class="ws-note">⚠️ 内容不会长期保存，请及时下载</span>
           </div>
           <div class="workspace-body">
             <StoryboardWorkspace
               :storyboards="storyboards"
+              :characters="characters"
               :characterImages="characterImages"
               :styleDeclaration="styleDeclaration"
-              @update:storyboards="storyboards = $event"
             />
           </div>
         </section>
@@ -244,7 +247,7 @@
     <el-dialog
       v-model="historyDialogVisible"
       title="历史记录"
-      width="720px"
+      width="1100px"
       :close-on-click-modal="true"
       class="history-dialog"
     >
@@ -253,39 +256,175 @@
         <p style="color: #9ca3af; margin-top: 16px;">暂无历史记录</p>
       </div>
       <div v-else class="history-dialog-list">
+        <!-- 表头 -->
+        <div class="history-row history-header">
+          <div class="history-col history-col-tool">工具</div>
+          <div class="history-col history-col-input">用户输入</div>
+          <div class="history-col history-col-result">AI生成内容</div>
+          <div class="history-col history-col-media">图片/视频</div>
+          <div class="history-col history-col-status">状态</div>
+          <div class="history-col history-col-time">时间</div>
+        </div>
+        <!-- 数据行 -->
         <div
           v-for="item in historyList"
           :key="item.id"
-          class="history-dialog-item"
+          class="history-row"
           :class="{ 'history-failed': item.status === 'failed' }"
         >
-          <div class="history-dialog-left">
-            <span class="history-dialog-tool">{{ formatToolName(item.toolType) }}</span>
-            <span class="history-dialog-preview">{{ item.inputPreview }}</span>
+          <!-- 工具类型 -->
+          <div class="history-col history-col-tool">
+            <span class="history-tool-tag">{{ formatToolName(item.tool) }}</span>
           </div>
-          <div class="history-dialog-right">
-            <span class="history-dialog-status" :class="`status-${item.status}`">
+          
+          <!-- 用户输入 -->
+          <div class="history-col history-col-input">
+            <div class="history-text-wrapper">
+              <pre class="history-text" :title="item.inputPreview">{{ item.inputPreview || '无' }}</pre>
+              <button 
+                v-if="item.inputPreview" 
+                class="history-copy-btn" 
+                @click="copyToClipboard(item.inputPreview)"
+                title="复制"
+              >
+                <i class="fa fa-copy"></i>
+              </button>
+            </div>
+          </div>
+          
+          <!-- AI生成内容 -->
+          <div class="history-col history-col-result">
+            <div v-if="item.resultText" class="history-text-wrapper">
+              <pre class="history-text ai-text" :title="item.resultText">{{ item.resultText }}</pre>
+              <button class="history-copy-btn" @click="copyToClipboard(item.resultText)" title="复制">
+                <i class="fa fa-copy"></i>
+              </button>
+            </div>
+            <div v-else class="history-no-text">无文本</div>
+          </div>
+          
+          <!-- 图片/视频 -->
+          <div class="history-col history-col-media">
+            <template v-if="item.resultUrl">
+              <!-- 图片 -->
+              <div v-if="isImageUrl(item.resultUrl)" class="history-media-card">
+                <el-image
+                  :src="item.resultUrl"
+                  :preview-src-list="[item.resultUrl]"
+                  fit="contain"
+                  class="history-img"
+                  :preview-teleported="true"
+                />
+              </div>
+              <!-- 视频 -->
+              <div v-else-if="isVideoUrl(item.resultUrl)" class="history-media-card">
+                <div class="history-video-box">
+                  <video controls style="width:100%; height:100%; object-fit: cover;">
+                    <source :src="item.resultUrl" type="video/mp4" />
+                  </video>
+                </div>
+              </div>
+              <!-- 其他链接 -->
+              <a v-else :href="item.resultUrl" target="_blank" class="history-link">
+                <i class="fa fa-external-link"></i> 打开
+              </a>
+            </template>
+            <div v-else class="history-no-text">无</div>
+          </div>
+          
+          <!-- 状态 -->
+          <div class="history-col history-col-status">
+            <span class="history-status" :class="`status-${item.status}`">
               {{ item.status === 'success' ? '成功' : item.status === 'pending' ? '生成中' : '失败' }}
             </span>
-            <span class="history-dialog-time">{{ formatTime(item.createdAt) }}</span>
+          </div>
+          
+          <!-- 时间 -->
+          <div class="history-col history-col-time">
+            <span class="history-time">{{ formatTime(item.createdAt) }}</span>
           </div>
         </div>
       </div>
+      
       <div v-if="historyTotal > historySize" class="history-dialog-pagination">
         <el-pagination
-          v-model:current-page="historyPage"
+          :current-page="historyPage"
           :page-size="historySize"
           :total="historyTotal"
           layout="prev, pager, next"
-          @current-change="fetchHistoryList"
+          @current-change="handlePageChange"
         />
+      </div>
+    </el-dialog>
+
+    <!-- ===== 使用教程弹窗 ===== -->
+    <el-dialog v-model="showTutorial" title="使用教程" width="680px" :close-on-click-modal="true" class="tutorial-dialog">
+      <div class="tutorial-content">
+        <h3>📚 漫剧创作平台使用指南</h3>
+        
+        <h4>一、免费与积分机制</h4>
+        <div class="tutorial-section">
+          <p><strong>未登录用户：</strong>每个工具每日有1次免费试用机会（剧本生成、拆解剧本、角色生成、场景生成、关键帧生成、视频生成各1次）。试用数据仅保存在本地浏览器，刷新页面后清除。</p>
+          <p><strong>已登录用户：</strong>注册即送100积分，可享受完整功能。每个工具积分消耗如下：</p>
+          <ul>
+            <li>剧本生成：10积分</li>
+            <li>拆解剧本：5积分</li>
+            <li>角色生成：10积分</li>
+            <li>场景生成：10积分</li>
+            <li>关键帧生成：10积分</li>
+            <li>视频生成：20积分</li>
+          </ul>
+        </div>
+
+        <h4>二、典型创作流程</h4>
+        <div class="tutorial-section">
+          <p><strong>方式一：AI生成剧本 → 拆解 → 生成分镜</strong></p>
+          <p>1. 在「剧本生成」输入关键词，生成完整短剧剧本</p>
+          <p>2. 在「拆解剧本」粘贴剧本内容，AI自动拆解出角色、场景、分镜描述</p>
+          <p>3. 分镜生成区自动填充提示词，点击「生成场景图」「生成关键帧」制作分镜素材</p>
+          <p>4. 为每个分镜添加视频提示词，生成视频片段</p>
+          <p>5. 最后可下载全部素材进行后期剪辑</p>
+          
+          <p><strong>方式二：手动创作分镜</strong></p>
+          <p>跳过剧本生成，直接在「分镜生成」区手动添加分镜、手动编写提示词。</p>
+        </div>
+
+        <h4>三、各模块详解</h4>
+        <div class="tutorial-section">
+          <p><strong>剧本生成</strong>：输入一句话或关键词，AI生成完整短剧剧本（包含场景标记、角色台词、动作描写）。</p>
+          
+          <p><strong>拆解剧本</strong>：将剧本正文粘贴进去，AI自动提取角色信息、生成场景提示词、每个分镜的关键帧描述和视频提示词。</p>
+          <p class="tip">💡 拆解后的内容会自动填充分镜工作区，可直接用于后续生成。</p>
+          
+          <p><strong>角色生成</strong>：输入角色外貌描述，AI生成统一风格的角色四视图（正面、侧面、背面、大头）。</p>
+          <p class="tip">💡 生成的角色的形象图可用于关键帧生成，让角色在分镜中保持一致。</p>
+          
+          <p><strong>场景生成</strong>：根据场景描述生成纯背景图（不含人物）。</p>
+          <p class="tip">💡 场景图是生关键帧的前置条件。</p>
+          
+          <p><strong>关键帧生成</strong>：结合场景图和角色图，生成包含角色的分镜画面。</p>
+          <p class="tip">💡 关键帧是视频生成的素材，需先有场景图才能生成关键帧。</p>
+          
+          <p><strong>视频生成</strong>：根据关键帧图和视频提示词，生成4-5秒的视频片段。</p>
+          <p class="warning">⚠️ 视频生成需要较长时间（通常3-5分钟），请耐心等待。可关闭页面稍后再来查看结果。</p>
+        </div>
+
+        <h4>四、注意事项</h4>
+        <div class="tutorial-section">
+          <ul>
+            <li>积分不足时无法使用付费功能，请及时充值</li>
+            <li>免费试用每日重置，未登录用户数据刷新后丢失</li>
+            <li>视频生成等异步任务可在历史记录中查看状态</li>
+            <li>分镜内容保存在本地浏览器，换设备或清缓存会丢失，记得及时下载</li>
+          </ul>
+        </div>
       </div>
     </el-dialog>
   </div>
 </template>
 
 <script setup>
-import { ref, onMounted, provide, watch, onUnmounted } from 'vue'
+import { ref, onMounted, provide, watch, onUnmounted, onBeforeUnmount, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 // 引入业务逻辑相关
@@ -306,6 +445,17 @@ import CharacterWorkspace from './components/CharacterWorkspace.vue'
 import StoryboardWorkspace from './components/StoryboardWorkspace.vue'
 
 const router = useRouter()
+
+// 导航方法
+const goToLogin = () => {
+  console.log('goToLogin called, router:', router)
+  router.push('/login')
+}
+const goToRegister = () => {
+  console.log('goToRegister called')
+  router.push('/register')
+}
+
 // ========== 核心业务逻辑（完全保留） ==========
 const user = JSON.parse(localStorage.getItem('user') || '{}')
 const username = ref(user.username || '')
@@ -314,6 +464,57 @@ const points = ref(0)
 // 用户卡片相关
 const showUserCard = ref(false)
 const recentHistory = ref([])
+const userMenuRef = ref(null)
+let clickOutsideListener = null  // 存储监听器引用
+
+// 切换用户卡片显示
+const toggleUserCard = () => {
+  if (showUserCard.value) {
+    // 已显示，则关闭并移除监听器
+    showUserCard.value = false
+    removeClickOutsideListener()
+  } else {
+    // 未显示，则打开并添加监听器
+    showUserCard.value = true
+    addClickOutsideListener()
+  }
+}
+
+// 添加点击外部监听
+const addClickOutsideListener = () => {
+  // 先移除旧的，避免重复注册
+  removeClickOutsideListener()
+  setTimeout(() => {
+    clickOutsideListener = (event) => {
+      // 忽略 el-dialog 弹窗内的点击事件
+      if (event.target.closest('.el-dialog')) return
+      if (!userMenuRef.value || !userMenuRef.value.contains(event.target)) {
+        showUserCard.value = false
+        removeClickOutsideListener()
+      }
+    }
+    document.addEventListener('click', clickOutsideListener)
+  }, 0)
+}
+
+// 移除点击外部监听
+const removeClickOutsideListener = () => {
+  if (clickOutsideListener) {
+    document.removeEventListener('click', clickOutsideListener)
+    clickOutsideListener = null
+  }
+}
+
+// 关闭用户卡片
+const closeUserCard = () => {
+  showUserCard.value = false
+  removeClickOutsideListener()
+}
+
+// 组件卸载时清理
+onBeforeUnmount(() => {
+  removeClickOutsideListener()
+})
 
 // 历史记录弹窗相关
 const historyDialogVisible = ref(false)
@@ -321,6 +522,50 @@ const historyList = ref([])
 const historyTotal = ref(0)
 const historyPage = ref(1)
 const historySize = ref(20)
+const expandedHistoryId = ref(null)  // 当前展开的历史记录ID
+
+// 切换历史记录展开/收起
+const toggleHistoryExpand = (id) => {
+  expandedHistoryId.value = expandedHistoryId.value === id ? null : id
+}
+
+// 复制到剪贴板
+const copyToClipboard = (text) => {
+  navigator.clipboard.writeText(text).then(() => {
+    ElMessage.success('已复制到剪贴板')
+  }).catch(() => {
+    // 降级方案
+    const textarea = document.createElement('textarea')
+    textarea.value = text
+    document.body.appendChild(textarea)
+    textarea.select()
+    document.execCommand('copy')
+    document.body.removeChild(textarea)
+    ElMessage.success('已复制到剪贴板')
+  })
+}
+
+// 下载媒体文件
+const downloadMedia = (url) => {
+  const a = document.createElement('a')
+  a.href = url
+  a.download = url.split('/').pop() || 'download'
+  document.body.appendChild(a)
+  a.click()
+  document.body.removeChild(a)
+}
+
+// 判断是否是视频URL（兼容带参数的URL）
+const isVideoUrl = (url) => {
+  if (!url) return false
+  return /\.(mp4|webm|ogg|mov)(?:\?.*)?$/i.test(url)
+}
+
+// 判断是否是图片URL（不是视频的就是图片，兼容CDN链接）
+const isImageUrl = (url) => {
+  if (!url) return false
+  return !/\.(mp4|webm|ogg|mov)(?:\?.*)?$/i.test(url)
+}
 
 // 工具名称映射
 const toolNameMap = {
@@ -332,7 +577,7 @@ const toolNameMap = {
   'video_generate': '视频生成'
 }
 
-const formatToolName = (toolType) => toolNameMap[toolType] || toolType
+const formatToolName = (tool) => toolNameMap[tool] || tool
 
 // 相对时间格式化
 const formatTime = (dateStr) => {
@@ -351,6 +596,24 @@ const formatTime = (dateStr) => {
   }
 }
 
+// 格式化AI生成的结果文本
+const formatResultText = (tool, resultText) => {
+  if (!resultText) return ''
+  // 剧本生成：提取标题（格式通常是"《xxx》"）
+  if (tool === 'script_generate') {
+    const match = resultText.match(/《([^》]+)》/)
+    if (match) return match[1]
+    // 没有标题时，截取前30字
+    return resultText.substring(0, 30) + (resultText.length > 30 ? '...' : '')
+  }
+  // 拆解剧本：截取前30字
+  if (tool === 'parse_script') {
+    return resultText.substring(0, 30) + (resultText.length > 30 ? '...' : '')
+  }
+  // 其他类型直接截取
+  return resultText.substring(0, 30) + (resultText.length > 30 ? '...' : '')
+}
+
 // 获取最近历史记录
 const fetchRecentHistory = async () => {
   if (!user.id) return
@@ -365,9 +628,17 @@ const fetchRecentHistory = async () => {
 }
 
 // 打开历史记录弹窗
-const openHistoryDialog = async () => {
+const openHistoryDialog = () => {
+  // 关闭用户卡片
+  showUserCard.value = false
+  // 关闭外部点击监听
+  if (clickOutsideListener) {
+    document.removeEventListener('click', clickOutsideListener)
+    clickOutsideListener = null
+  }
+  // 打开弹窗并获取数据
   historyDialogVisible.value = true
-  await fetchHistoryList()
+  fetchHistoryList()
 }
 
 // 获取全部历史记录
@@ -376,12 +647,18 @@ const fetchHistoryList = async () => {
   try {
     const res = await getHistoryList(historyPage.value, historySize.value)
     if (res.data.code === 200) {
-      historyList.value = res.data.data.list
-      historyTotal.value = res.data.data.total
+      historyList.value = res.data.data.list || []
+      historyTotal.value = res.data.data.total || 0
     }
   } catch (err) {
     console.error('获取历史记录失败:', err)
   }
+}
+
+// 分页切换
+const handlePageChange = (page) => {
+  historyPage.value = page
+  fetchHistoryList()
 }
 
 // 初始化数据
@@ -411,17 +688,39 @@ const fetchPoints = async () => {
 const refreshPoints = () => fetchPoints()
 provide('refreshPoints', refreshPoints)
 
+// 刷新最近使用记录（供子组件调用）
+const refreshRecentHistory = () => fetchRecentHistory()
+provide('refreshRecentHistory', refreshRecentHistory)
+
 // 回调函数
 const handleParsed = (data) => {
   styleDeclaration.value = data.styleDeclaration || ''
   characters.value = data.characters || []
-  storyboards.value = data.storyboards || []
+  // 将后端数据结构映射为前端需要的格式，并保存
+  storyboards.value = data.storyboards.map(s => ({
+    id: Date.now() + '-' + Math.random().toString(36).substr(2, 6),
+    description: s.description || '',
+    characters: s.characters || [],
+    scenePrompt: s.scenePrompt || '',
+    sceneImageUrl: '',
+    keyframePrompt: s.detailedDescription || '',  // 关键：映射为 keyframePrompt
+    keyframeImageUrl: '',
+    videoPrompt: s.videoPrompt || s.detailedDescription || '',
+    videoUrl: ''
+  }))
   characterImages.value = {}
+  fetchRecentHistory()  // 刷新最近使用记录
   ElMessage.success('拆解成功！')
 }
 
 const handleCharacterGenerated = ({ name, imageUrl }) => {
   characterImages.value[name] = imageUrl
+  fetchRecentHistory()  // 刷新最近使用记录
+}
+
+// 剧本生成成功后刷新历史记录
+const handleScriptGenerated = () => {
+  fetchRecentHistory()
 }
 
 // 退出登录
@@ -452,25 +751,33 @@ const scrollTo = (id) => {
   if (el) el.scrollIntoView({ behavior: 'smooth' })
 }
 
-// 滚动监听，自动高亮导航
+// 滚动监听，自动高亮导航（防抖处理）
+let scrollTimeout = null
 const handleScroll = () => {
-  const scrollTop = window.scrollY
-  // 遍历所有工作区，找到当前滚动到的区域
-  for (const item of navItems) {
-    const el = document.getElementById(item.id)
-    if (el) {
-      const offsetTop = el.offsetTop
-      const offsetHeight = el.offsetHeight
-      if (scrollTop >= offsetTop - 100 && scrollTop < offsetTop + offsetHeight - 100) {
-        activeNav.value = item.id
-        break
+  if (scrollTimeout) return
+  scrollTimeout = setTimeout(() => {
+    const scrollTop = window.scrollY
+    // 遍历所有工作区，找到当前滚动到的区域
+    for (const item of navItems) {
+      const el = document.getElementById(item.id)
+      if (el) {
+        const offsetTop = el.offsetTop
+        const offsetHeight = el.offsetHeight
+        if (scrollTop >= offsetTop - 100 && scrollTop < offsetTop + offsetHeight - 100) {
+          if (activeNav.value !== item.id) {
+            activeNav.value = item.id
+          }
+          break
+        }
       }
     }
-  }
+    scrollTimeout = null
+  }, 50)
 }
 
 // ========== 灵感助手优化（加loading/错误处理/空状态） ==========
 const inspireVisible = ref(false)
+const showTutorial = ref(false)  // 教程弹窗
 const inspireTab = ref('rank')
 const rankList = ref([])
 const searchKeyword = ref('')
@@ -1007,6 +1314,68 @@ onUnmounted(() => {
 .inspire-dialog {
   --el-dialog-border-radius: 20px;
 }
+
+/* ===== 使用教程弹窗 ===== */
+.tutorial-dialog {
+  --el-dialog-border-radius: 16px;
+}
+.tutorial-content {
+  max-height: 60vh;
+  overflow-y: auto;
+  padding-right: 8px;
+}
+.tutorial-content h3 {
+  margin: 0 0 20px 0;
+  font-size: 20px;
+  background: linear-gradient(135deg, #ec4899, #a855f7);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+.tutorial-content h4 {
+  margin: 20px 0 12px 0;
+  font-size: 16px;
+  color: #1f2937;
+  border-left: 3px solid #ec4899;
+  padding-left: 10px;
+}
+.tutorial-content h4:first-of-type {
+  margin-top: 0;
+}
+.tutorial-section {
+  padding: 12px 16px;
+  background: #f9fafb;
+  border-radius: 8px;
+  margin-bottom: 12px;
+}
+.tutorial-section p {
+  margin: 8px 0;
+  font-size: 14px;
+  line-height: 1.7;
+  color: #4b5563;
+}
+.tutorial-section ul {
+  margin: 8px 0;
+  padding-left: 20px;
+}
+.tutorial-section li {
+  margin: 6px 0;
+  font-size: 14px;
+  line-height: 1.6;
+  color: #4b5563;
+}
+.tutorial-content .tip {
+  color: #059669;
+  font-size: 13px;
+}
+.tutorial-content .warning {
+  color: #dc2626;
+  font-size: 13px;
+  background: #fef2f2;
+  padding: 8px 12px;
+  border-radius: 6px;
+  border-left: 3px solid #dc2626;
+}
 .dialog-header {
   display: flex; justify-content: space-between; align-items: center;
   margin-bottom: 16px;
@@ -1065,5 +1434,219 @@ onUnmounted(() => {
   .navbar-container { padding: 0 12px; }
   .workspace-card { padding: 20px; }
   .ws-desc { display: none; }
+}
+
+/* ===== 历史记录弹窗样式 ===== */
+.history-dialog-list {
+  max-height: 60vh;
+  overflow-y: auto;
+}
+
+/* 横向布局 */
+.history-row {
+  display: flex;
+  align-items: stretch;
+  border-bottom: 1px solid #e5e7eb;
+  padding: 12px 0;
+}
+.history-row:last-child {
+  border-bottom: none;
+}
+.history-row.history-failed {
+  background: #fef2f2;
+}
+.history-row:hover {
+  background: #f9fafb;
+}
+
+/* 列 */
+.history-col {
+  padding: 0 8px;
+  display: flex;
+  align-items: flex-start;
+  overflow: hidden;
+}
+.history-col-tool {
+  width: 80px;
+  flex-shrink: 0;
+  justify-content: center;
+}
+.history-col-input {
+  width: 180px;
+  flex-shrink: 0;
+}
+.history-col-result {
+  flex: 1;
+  min-width: 200px;
+}
+.history-col-media {
+  width: 160px;
+  flex-shrink: 0;
+  justify-content: flex-start;
+}
+.history-col-status {
+  width: 60px;
+  flex-shrink: 0;
+  justify-content: center;
+}
+.history-col-time {
+  width: 80px;
+  flex-shrink: 0;
+  justify-content: center;
+}
+
+/* 表头 */
+.history-header {
+  background: #f3f4f6;
+  border-radius: 8px;
+  padding: 10px 0;
+  margin-bottom: 4px;
+}
+.history-header:hover {
+  background: #f3f4f6;
+}
+.history-header .history-col {
+  font-weight: 600;
+  color: #374151;
+  font-size: 13px;
+}
+
+/* 工具标签 */
+.history-tool-tag {
+  background: linear-gradient(135deg, #8b5cf6, #a78bfa);
+  color: white;
+  padding: 4px 8px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+/* 文本内容 */
+.history-text-wrapper {
+  position: relative;
+  width: 100%;
+}
+.history-text-wrapper:hover .history-copy-btn {
+  opacity: 1;
+}
+.history-text {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: #4b5563;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 120px;
+  overflow-y: auto;
+  background: #f9fafb;
+  padding: 6px 8px;
+  border-radius: 4px;
+  width: 100%;
+  padding-right: 28px;
+}
+.history-text.ai-text {
+  background: #faf5ff;
+  border: 1px solid #e9d5ff;
+}
+
+/* 复制按钮 */
+.history-copy-btn {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  background: white;
+  border: 1px solid #e5e7eb;
+  border-radius: 4px;
+  padding: 4px 6px;
+  cursor: pointer;
+  color: #6b7280;
+  font-size: 11px;
+  opacity: 0;
+  transition: all 0.2s;
+}
+.history-copy-btn:hover {
+  background: #8b5cf6;
+  border-color: #8b5cf6;
+  color: white;
+}
+.history-no-text {
+  color: #9ca3af;
+  font-size: 12px;
+  font-style: italic;
+}
+
+/* 图片/视频卡片 */
+.history-media-card {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 80px;
+}
+.history-video-card {
+  gap: 8px;
+}
+.history-img {
+  width: auto;
+  height: 100%;
+  max-width: 100%;
+  max-height: 120px;
+  object-fit: contain;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+/* 视频 */
+.history-video-box {
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  background: #1f2937;
+  border-radius: 4px;
+  overflow: hidden;
+}
+.history-video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+/* 链接 */
+.history-link {
+  color: #8b5cf6;
+  font-size: 12px;
+  text-decoration: none;
+}
+.history-link:hover {
+  text-decoration: underline;
+}
+
+/* 状态 */
+.history-status {
+  padding: 2px 6px;
+  border-radius: 8px;
+  font-size: 11px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+.status-success {
+  background: #dcfce7;
+  color: #16a34a;
+}
+.status-failed {
+  background: #fee2e2;
+  color: #dc2626;
+}
+.status-pending {
+  background: #fef3c7;
+  color: #d97706;
+}
+
+/* 时间 */
+.history-time {
+  color: #9ca3af;
+  font-size: 11px;
+  white-space: nowrap;
 }
 </style>

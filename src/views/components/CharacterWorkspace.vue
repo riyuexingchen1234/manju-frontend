@@ -2,16 +2,15 @@
   <div class="character-workspace">
     <div class="character-grid">
       <el-card
-        v-for="(char, idx) in props.characters"
-        :key="char.id || idx"
+        v-for="(char, idx) in localCharacters"
+        :key="idx"
         class="character-card"
         shadow="hover"
       >
         <template #header>
           <div class="card-header">
             <el-input
-              :value="char.name"
-              @input="updateCharacter(idx, 'name', $event)"
+              v-model="char.name"
               placeholder="角色名"
               size="small"
               style="width: 120px"
@@ -31,7 +30,7 @@
           <!-- 图片展示区 -->
           <div class="image-area">
             <el-image
-              v-if="props.characterImages[char.name]"
+              v-if="props.characterImages && props.characterImages[char.name]"
               :src="props.characterImages[char.name]"
               :preview-src-list="[props.characterImages[char.name]]"  
               fit="cover"
@@ -44,8 +43,7 @@
 
           <!-- 提示词输入框 -->
           <el-input
-            :value="char.characterPrompt"
-            @input="updateCharacter(idx, 'characterPrompt', $event)"
+            v-model="char.characterPrompt"
             type="textarea"
             :rows="4"
             placeholder="请输入角色提示词"
@@ -102,7 +100,7 @@
 </template>
 
 <script setup>
-import { ref, watch, inject,onMounted } from 'vue'
+import { ref, watch, inject, onMounted, onBeforeMount } from 'vue'
 import { ElMessage } from 'element-plus'
 import { generateCharacter } from '@/api/character'
 import { Plus } from '@element-plus/icons-vue'
@@ -114,24 +112,33 @@ const props = defineProps({
 })
 const emit = defineEmits(['character-generated','update-characters'])
 
-// ========== 确保至少有一个有效角色卡片 ==========
-const ensureAtLeastOneCharacter = () => {
-  if (!props.characters || props.characters.length === 0) {
-    emit('update-characters', [{ name: '', characterPrompt: '' }])
-  } else {
-    const hasInvalid = props.characters.some(c => c.name === undefined || c.characterPrompt === undefined)
-    if (hasInvalid) {
-      const valid = props.characters.filter(c => c.name !== undefined && c.characterPrompt !== undefined)
-      if (valid.length === 0) {
-        emit('update-characters', [{ name: '', characterPrompt: '' }])
-      } else {
-        emit('update-characters', valid)
-      }
-    }
+// ========== 本地状态：避免直接修改 props ==========
+const localCharacters = ref([])
+let isSyncingFromProps = false  // 防止双向绑定循环
+
+// 同步 props 到本地（外部更新时如拆解剧本）
+watch(() => props.characters, (newVal) => {
+  if (newVal) {
+    isSyncingFromProps = true
+    localCharacters.value = JSON.parse(JSON.stringify(newVal))
+    isSyncingFromProps = false
   }
-}
-watch(() => props.characters, ensureAtLeastOneCharacter, { immediate: true, deep: true })
-onMounted(ensureAtLeastOneCharacter)
+}, { immediate: true, deep: true })
+
+// 同步本地变化到父组件（用户编辑时）
+watch(localCharacters, (newVal) => {
+  if (!isSyncingFromProps) {
+    emit('update-characters', JSON.parse(JSON.stringify(newVal)))
+  }
+}, { deep: true })
+
+// ========== 组件挂载时确保至少有一个角色 ==========
+onMounted(() => {
+  if (!localCharacters.value || localCharacters.value.length === 0) {
+    localCharacters.value = [{ name: '', characterPrompt: '' }]
+    emit('update-characters', localCharacters.value)
+  }
+})
 
 const refreshPoints = inject('refreshPoints')
 // 加载状态
@@ -140,30 +147,19 @@ const loadingStates = ref({})
 const showErrorModal = ref(false)
 const errorMessage = ref('')
 
-// 更新角色字段
-const updateCharacter = (index, field, value) => {
-  const newList = [...props.characters]
-  newList[index] = { ...newList[index], [field]: value }
-  emit('update-characters', newList)
-}
-
 // 添加新角色
 const addCharacter = () => {
-  const newName = `新角色${props.characters.length + 1}`
-  const newCharacter = { name: newName, characterPrompt: '' }
-  const newList = [...props.characters, newCharacter]
-  emit('update-characters', newList)
+  const newName = `新角色${localCharacters.value.length + 1}`
+  localCharacters.value.push({ name: newName, characterPrompt: '' })
 }
 
 // 删除角色
 const removeCharacter = (index) => {
-  const newList = [...props.characters]
-  newList.splice(index, 1)
-  if (newList.length === 0) {
+  localCharacters.value.splice(index, 1)
+  if (localCharacters.value.length === 0) {
     // 保持至少一个空白角色卡片
-    newList.push({ name: '', characterPrompt: '' })
+    localCharacters.value.push({ name: '', characterPrompt: '' })
   }
-  emit('update-characters', newList)
 }
 
 /**

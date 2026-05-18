@@ -196,8 +196,8 @@ const send = async () => {
     if (res.data.code === 200) {
       let aiContent = res.data.data
 
-      // 兼容格式
-      if (typeof aiContent === 'object' && aiContent.content !== undefined) {
+      // 兼容格式：后端返回ScriptGenerateResponse对象，需提取script字段
+      if (typeof aiContent === 'object' && aiContent.script !== undefined) {
         aiContent = aiContent.script
       }
 
@@ -247,7 +247,8 @@ const regenerate = async (idx) => {
     if (res.data.code === 200) {
       let aiContent = res.data.data
 
-      if (typeof aiContent === 'object' && aiContent.content !== undefined) {
+      // 兼容格式：后端返回ScriptGenerateResponse对象，需提取script字段
+      if (typeof aiContent === 'object' && aiContent.script !== undefined) {
         aiContent = aiContent.script
       }
 

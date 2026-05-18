@@ -57,10 +57,10 @@
               placeholder="选择或创建角色"
             >
               <el-option
-                v-for="(url, name) in characterImages"
-                :key="name"
-                :label="name"
-                :value="name"
+                v-for="char in characters"
+                :key="char.name || char.id"
+                :label="char.name || '未命名'"
+                :value="char.name || '未命名'"
               />
             </el-select>
           </div>
@@ -216,7 +216,7 @@
 </template>
 
 <script setup>
-import { ref, watch, onMounted, inject, computed, nextTick } from 'vue'  
+import { ref, watch, onMounted, inject, computed, nextTick, onBeforeUnmount } from 'vue'  
 import { ElMessage } from 'element-plus'
 import JSZip from 'jszip'
 import { saveAs } from 'file-saver'
@@ -227,11 +227,13 @@ import { loadLocalStoryboards, saveLocalStoryboards } from '@/utils/storage'
 
 const props = defineProps({
   storyboards: { type: Array, default: () => [] },
+  characters: { type: Array, default: () => [] },  // 角色列表，用于下拉选择
   characterImages: { type: Object, default: () => ({}) }
 })
 
 const emit = defineEmits(['keyframe-generated', 'video-generated', 'update:storyboards'])
 const refreshPoints = inject('refreshPoints')
+const refreshRecentHistory = inject('refreshRecentHistory')
 
 // 本地分镜数据
 const localStoryboards = ref([])
@@ -247,59 +249,92 @@ const previewPlayerRef = ref(null)
 let previewIndex = 0
 let previewVideoList = []
 let isPreviewing = false   // 防止重复调用
+// 视频轮询interval引用，用于组件卸载时清理
+const pollIntervals = {}
 
 const generateId = () => Date.now() + '-' + Math.random().toString(36).substr(2, 6)
 
-// 初始化数据：优先从 localStorage 读取，否则根据 props 初始化
+// 组件卸载时清理所有interval
+onBeforeUnmount(() => {
+  // 清理所有视频轮询interval
+  Object.values(pollIntervals).forEach(intervalId => {
+    if (intervalId) clearInterval(intervalId)
+  })
+})
+
+// 防递归标志
+let isInitializingFromProps = false
+
+// 初始化数据：优先从 props 读取（拆解新剧本），否则从 localStorage 读取
 // 初始化函数
 const initData = () => {
-  const stored = loadLocalStoryboards()
-  if (stored && stored.length > 0){
-    // 如果本地有缓存，直接使用
-    localStoryboards.value = stored
-  }else if (props.storyboards && props.storyboards.length > 0){
-    // 否则根据 props 初始化（拆解新剧本）
+  // 防止递归
+  if (isInitializingFromProps) return
+  
+  // 如果有 props.storyboards（拆解新剧本传入），优先使用
+  if (props.storyboards && props.storyboards.length > 0) {
+    isInitializingFromProps = true
     localStoryboards.value = props.storyboards.map(s => ({
       id: generateId(),
       description: s.description || '',
       characters: s.characters || [],
       scenePrompt: s.scenePrompt || '',
       sceneImageUrl: '',
-      keyframePrompt: s.detailedDescription || '',
+      keyframePrompt: s.keyframePrompt || s.detailedDescription || '',
       keyframeImageUrl: '',
-      videoPrompt: s.videoPrompt || s.detailedDescription || '',
+      videoPrompt: s.videoPrompt || s.keyframePrompt || s.detailedDescription || '',
       videoUrl: ''
     }))
     saveLocalStoryboards(localStoryboards.value) // 立即保存
+    // 下一个 tick 清除标志
+    setTimeout(() => { isInitializingFromProps = false }, 0)
   } else {
-    // 默认新建一个空白分镜
-    localStoryboards.value = [{
-      id: generateId(),
-      description: '',
-      characters: [],
-      scenePrompt: '',
-      sceneImageUrl: '',
-      keyframePrompt: '',
-      keyframeImageUrl: '',
-      videoPrompt: '',
-      videoUrl: ''
-    }]
-    saveLocalStoryboards(localStoryboards.value)
+    // 否则从本地缓存读取
+    const stored = loadLocalStoryboards()
+    if (stored && stored.length > 0) {
+      localStoryboards.value = stored
+    } else {
+      // 默认新建一个空白分镜
+      localStoryboards.value = [{
+        id: generateId(),
+        description: '',
+        characters: [],
+        scenePrompt: '',
+        sceneImageUrl: '',
+        keyframePrompt: '',
+        keyframeImageUrl: '',
+        videoPrompt: '',
+        videoUrl: ''
+      }]
+      saveLocalStoryboards(localStoryboards.value)
+    }
   }
 }
 
-// 监听本地分镜变化自动保存
+// 监听本地分镜变化 - 只保存到localStorage，不向上emit（防止编辑时数据被覆盖）
 watch(localStoryboards, (newVal) => {
   saveLocalStoryboards(newVal)
-  emit('update:storyboards', newVal)
 }, { deep: true })
 
 // 监听 props.storyboards 变化（拆解新剧本时覆盖本地缓存）
 watch(() => props.storyboards, (newVal) => {
   if (newVal && newVal.length > 0) {
-    // 清除旧缓存，重新初始化
+    // 清除旧缓存，使用新数据
     localStorage.removeItem('manju_local_storyboards')
-    initData()
+    isInitializingFromProps = true
+    localStoryboards.value = newVal.map(s => ({
+      id: generateId(),
+      description: s.description || '',
+      characters: s.characters || [],
+      scenePrompt: s.scenePrompt || '',
+      sceneImageUrl: '',
+      keyframePrompt: s.keyframePrompt || s.detailedDescription || '',
+      keyframeImageUrl: '',
+      videoPrompt: s.videoPrompt || s.keyframePrompt || s.detailedDescription || '',
+      videoUrl: ''
+    }))
+    saveLocalStoryboards(localStoryboards.value)
+    setTimeout(() => { isInitializingFromProps = false }, 0)
   }
 }, { deep: true })
 
@@ -379,6 +414,7 @@ const generateScene = async (index) => {
 
       // 9. 调用注入的方法，刷新用户积分（生成图片消耗积分）
       refreshPoints()
+      refreshRecentHistory?.()
     } else {
       // 10. 后端返回失败，提示错误信息
       errorMessage.value = res.data.msg || '生成失败，请稍后重试'
@@ -429,6 +465,7 @@ const generateKeyframe = async (index) => {
       ElMessage.success('关键帧生成成功')
       emit('keyframe-generated', { index, imageUrl: story.keyframeImageUrl })
       refreshPoints()
+      refreshRecentHistory?.()
     } else {
       errorMessage.value = res.data.msg || '生成失败，请稍后重试'
       showErrorModal.value = true
@@ -500,10 +537,12 @@ const generateVideo = async (index) => {
       // 轮询：每15秒查询一次，最多80次（约20分钟）
       let pollCount = 0
       const MAX_POLL_COUNT = 80
-      const poll = setInterval(async () => {
+      // 存储interval引用，用于组件卸载时清理
+      pollIntervals[index] = setInterval(async () => {
         pollCount++
         if (pollCount >= MAX_POLL_COUNT) {
-          clearInterval(poll)
+          clearInterval(pollIntervals[index])
+          delete pollIntervals[index]
           videoLoading.value[index] = false
           ElMessage.error('视频生成超时，请稍后重试')
           return
@@ -519,17 +558,20 @@ const generateVideo = async (index) => {
               // 12.1 将生成的视频URL赋值给当前分镜（前端页面会自动显示视频）
               story.videoUrl = result.data.data.videoUrl
               // 12.2 清除定时器（停止轮询，避免无限查询）
-              clearInterval(poll)
+              clearInterval(pollIntervals[index])
+              delete pollIntervals[index]
               // 12.3 提示用户生成成功
               ElMessage.success('视频生成成功')
               // 12.4 关闭当前分镜的加载状态
               videoLoading.value[index] = false
               // 12.5 刷新用户积分（因为生成视频消耗了积分）
               refreshPoints()
+              refreshRecentHistory?.()
               // 13. 状态判断2：任务生成失败
             } else if (status === 'FAILED') {
               // 13.1 清除定时器
-              clearInterval(poll)
+              clearInterval(pollIntervals[index])
+              delete pollIntervals[index]
               // 13.2 提示用户失败原因（从后端返回的error字段获取）
               ElMessage.error('视频生成失败：' + result.data.data.error)
               // 13.3 关闭当前分镜的加载状态

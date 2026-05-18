@@ -50,7 +50,7 @@ const showErrorModal = ref(false)
 const errorMessage = ref('')
 
 const parse = async () => {
-  if (!script.value.trim()) return
+  if (!script.value.trim() || loading.value) return  // 防止重复提交
   loading.value = true
   try {
     const res = await parseScript(script.value)
