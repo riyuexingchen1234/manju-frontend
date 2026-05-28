@@ -3,10 +3,10 @@
     <!-- 工具栏 -->
     <div class="storyboard-toolbar">
       <div class="actions">
-        <el-button type="primary" @click="previewAllVideos" :disabled="!hasVideos">
+        <el-button type="primary" @click="previewVideo" :disabled="!hasVideos">
           预览所有子视频
         </el-button>
-        <el-button type="success" @click="downloadAllVideos" :disabled="!hasVideos">
+        <el-button type="success" @click="downloadVideos" :disabled="!hasVideos">
           合并下载
         </el-button>
       </div>
@@ -14,6 +14,7 @@
 
     <!-- 分镜列表 -->
     <div class="storyboard-list">
+      <!-- 循环渲染本地的分镜数据（localStoryboards），每个分镜对应一个卡片 -->
       <el-card
         v-for="(story, idx) in localStoryboards"
         :key="story.id"
@@ -22,6 +23,8 @@
       >
         <template #header>
           <div class="card-header">
+            <!-- idx数组下标从0开始，用 +1 显示给用户的序号：分镜1 -->
+            <!-- 显示给用户的是idx+1，实际还是idx 所以移除时是idx -->
             <span>分镜 {{ idx + 1 }}</span>
             <el-button
               type="danger"
@@ -45,7 +48,11 @@
             />
           </div>
 
-          <!-- 涉及角色 -->
+          <!-- 涉及角色
+          multiple 开启多选模式，v-model 绑定的值必须是数组（对应 story.characters 数组），可以同时选中多个角色。
+          filterable 开启搜索过滤，输入文字会自动匹配下拉选项，适合角色较多的场景。
+          allow-create 允许手动创建新选项：输入框里输入不存在的角色名，按下回车即可新增，不用提前在数据源里配置。
+          default-first-option 配合搜索 / 回车使用：按下回车时，自动选中筛选结果里的第一个选项，提升操作体验。-->
           <div class="block">
             <div class="block-title">涉及角色</div>
             <el-select
@@ -56,6 +63,7 @@
               default-first-option
               placeholder="选择或创建角色"
             >
+              <!-- el-option 取值规则 label 是页面展示文本，value 是双向绑定到 story.characters 的真实值，这里统一绑定角色名。 -->
               <el-option
                 v-for="char in characters"
                 :key="char.name || char.id"
@@ -69,6 +77,9 @@
           <div class="block">
             <div class="block-title">场景图</div>
             <div class="image-box">
+              <!-- v-if 控制这个 el-image 组件要不要被创建，它不会把值传给组件内部。
+              :src 是在告诉 el-image 组件去哪里加载图片，没有这个属性，组件被创建出来也不知道该显示什么。
+              preview-src-list 开启大图预览功能，点击图片会弹出全屏预览窗口。必须传数组，单张图片就写成 [图片地址]。 -->
               <el-image
                 v-if="story.sceneImageUrl" 
                 :src="story.sceneImageUrl" 
@@ -84,11 +95,16 @@
               placeholder="场景提示词"
               class="prompt-input"
             />
-            <div class="button-group">
+            <div class="button-row">
+              <!-- show-file-list="false" 隐藏组件默认的上传文件列表，只保留按钮，界面更简洁。
+              http-request 覆盖组件默认的上传请求逻辑，接管文件上传全过程：
+              组件会自动把文件、文件信息封装成 options 对象传给回调
+              手动把 options 和当前分镜下标 idx 一并传给自定义方法 uploadScene
+              不再走 Element Plus 自带的接口配置，完全由自己写 JS 处理文件。 -->
               <el-upload
                 class="upload-btn"
                 :show-file-list="false"
-                :http-request="(options) => handleSceneUpload(idx, options)"
+                :http-request="(options) => uploadScene(idx, options)"
               >
                 <el-button size="small" type="default">本地上传</el-button>
               </el-upload>
@@ -140,6 +156,8 @@
           <div class="block">
             <div class="block-title">视频</div>
             <div class="image-box" >
+              <!-- <video> 原生视频标签，controls 是原生属性：显示播放、暂停、进度条、音量等原生控制栏。
+              <source> 子标签 :src 绑定视频地址 type="video/mp4" 声明视频格式，帮助浏览器解析资源。 -->
               <video v-if="story.videoUrl" controls style="width:100%; height:100%;" >
                 <source :src="story.videoUrl" type="video/mp4" />
               </video>
@@ -152,17 +170,16 @@
               placeholder="视频提示词（描述镜头运动、动态等）"
               class="prompt-input"
             />
-            <div class="button-group">
-              <el-button
-                type="primary"
-                @click="generateVideo(idx)"
-                :loading="videoLoading[idx]"
-                size="small"
-                :disabled="!story.keyframeImageUrl || !story.videoPrompt.trim()"
+            <el-button
+              type="primary"
+              @click="generateVideo(idx)"
+              :loading="videoLoading[idx]"
+              size="small"
+              :disabled="!story.keyframeImageUrl || !story.videoPrompt.trim()"
               >
                 生成视频 20分
-              </el-button>
-            </div>
+            </el-button>
+            
             <div class="hint" v-if="!story.keyframeImageUrl">
               需先有关键帧
             </div>
@@ -173,7 +190,7 @@
         </div>
       </el-card>
     </div>
-
+    <!-- 添加分镜按钮 -->
     <div class="add-button-container">
       <el-button  @click="addStoryboard" class="add-storyboard-btn">+ 添加分镜</el-button>
     </div>
@@ -216,519 +233,458 @@
 </template>
 
 <script setup>
-import { ref, watch, onMounted, inject, computed, nextTick, onBeforeUnmount } from 'vue'  
-import { ElMessage } from 'element-plus'
-import JSZip from 'jszip'
-import { saveAs } from 'file-saver'
+import { ref, reactive, watch, onMounted, onBeforeUnmount, computed, nextTick } from 'vue'
 import { generateScene as generateSceneApi } from '@/api/scene'
 import { generateKeyframe as generateKeyframeApi } from '@/api/keyframe'
 import { createVideoTask, queryVideoTask } from '@/api/video'
-import { loadLocalStoryboards, saveLocalStoryboards } from '@/utils/storage'
+import { ElMessage } from 'element-plus'
+import JSZip from 'jszip'
+import { saveAs } from 'file-saver'
 
+// ========== Props ==========
 const props = defineProps({
   storyboards: { type: Array, default: () => [] },
-  characters: { type: Array, default: () => [] },  // 角色列表，用于下拉选择
-  characterImages: { type: Object, default: () => ({}) }
+  characters: { type: Array, default: () => [] },   // 角色列表（前端选择角色用）
+  characterImages: { type: Object, default: () => ({}) }, // 角色图片（生成关键帧用）
+  styleDeclaration: { type: String, default: '' }
 })
 
-const emit = defineEmits(['keyframe-generated', 'video-generated', 'update:storyboards'])
-const refreshPoints = inject('refreshPoints')
-const refreshRecentHistory = inject('refreshRecentHistory')
+// ========== Emits ==========
+const emit = defineEmits(['update-storyboards', 'generated'])
 
-// 本地分镜数据
+// ========== 响应式数据 ==========
 const localStoryboards = ref([])
+const showErrorModal = ref(false)
+const errorMessage = ref('')
+
+const previewDialogVisible = ref(false)   // 视频预览弹窗
+const previewPlayerRef = ref(null)        // 视频播放器DOM
+const currentPreviewIndex = ref(0)        // 当前播放第几个
+// 用对象存每个分镜的 loading，避免所有按钮一起 loading。
 const sceneLoading = ref({})
 const keyframeLoading = ref({})
 const videoLoading = ref({})
-// 失败弹窗相关变量
-const showErrorModal = ref(false)
-const errorMessage = ref('')
-// 预览相关变量
-const previewDialogVisible = ref(false)
-const previewPlayerRef = ref(null)
-let previewIndex = 0
-let previewVideoList = []
-let isPreviewing = false   // 防止重复调用
-// 视频轮询interval引用，用于组件卸载时清理
-const pollIntervals = {}
+// 工具函数 兼容提取imageUrl
+const extractImageUrl = (data) => typeof data === 'string' ? data : data?.imageUrl || data
 
-const generateId = () => Date.now() + '-' + Math.random().toString(36).substr(2, 6)
+const createEmptyStoryboard = () => ({
+  id: Date.now(),
+  description: '',
+  scenePrompt: '',
+  // AI 返回的原始字段 只读的原始存档，不暴露给用户编辑，不单独显示在界面上，只作为内部备份存在分镜数据里。
+  detailedDescription: '',    
+  videoPrompt: '',
+  // 复制了一份detailedDescription，用户可以修改的工作副本，显示在分镜卡片的关键帧区域输入框里
+  keyframePrompt: '',
+  characters: [],
+  sceneImageUrl: '',
+  keyframeImageUrl: '',
+  videoUrl: ''
+})
+// 视频轮询定时器集合 普通对象，不是响应式的。
+// 存储每个分镜的轮询定时器，key是storyId，value是setInterval返回的定时器id。
+// 不需要响应式是因为这个数据不需要驱动界面更新，只是内部管理用。
+// 不用数组是因为想关闭单个定时器需要遍历数组，对象可以直接 键值对快速查找
+const pollTimers = {}
 
-// 组件卸载时清理所有interval
-onBeforeUnmount(() => {
-  // 清理所有视频轮询interval
-  Object.values(pollIntervals).forEach(intervalId => {
-    if (intervalId) clearInterval(intervalId)
-  })
+// ========== 计算属性 ==========
+// computed 计算属性，，基于现有数据计算出新值，自动根据依赖变化重新计算。
+// .some(s => s.videoUrl) 数组方法：数组.some(项 => 条件)
+// 循环数组每一项，对每一项执行写的条件，只要找到一个满足条件 → 立刻返回 true，全不满足返回false
+const hasVideos = computed(() => {
+  return localStoryboards.value.some(s => s.videoUrl)
 })
 
-// 防递归标志
-let isInitializingFromProps = false
-
-// 初始化数据：优先从 props 读取（拆解新剧本），否则从 localStorage 读取
-// 初始化函数
-const initData = () => {
-  // 防止递归
-  if (isInitializingFromProps) return
-  
-  // 如果有 props.storyboards（拆解新剧本传入），优先使用
+// ========== 初始化与同步 ==========（单向数据流）
+// 遍历父组件传来的所有分镜，每一个分镜都复制一份全新的对象，最后返回一个全新的数组,避免直接修改父组件数据 
+// ... 扩展运算符 作用：把一个对象的所有属性 展开 复制一遍
+const initFromProps = () => {
   if (props.storyboards && props.storyboards.length > 0) {
-    isInitializingFromProps = true
-    localStoryboards.value = props.storyboards.map(s => ({
-      id: generateId(),
-      description: s.description || '',
-      characters: s.characters || [],
-      scenePrompt: s.scenePrompt || '',
-      sceneImageUrl: '',
-      keyframePrompt: s.keyframePrompt || s.detailedDescription || '',
-      keyframeImageUrl: '',
-      videoPrompt: s.videoPrompt || s.keyframePrompt || s.detailedDescription || '',
-      videoUrl: ''
-    }))
-    saveLocalStoryboards(localStoryboards.value) // 立即保存
-    // 下一个 tick 清除标志
-    setTimeout(() => { isInitializingFromProps = false }, 0)
-  } else {
-    // 否则从本地缓存读取
-    const stored = loadLocalStoryboards()
-    if (stored && stored.length > 0) {
-      localStoryboards.value = stored
-    } else {
-      // 默认新建一个空白分镜
-      localStoryboards.value = [{
-        id: generateId(),
-        description: '',
-        characters: [],
-        scenePrompt: '',
-        sceneImageUrl: '',
-        keyframePrompt: '',
-        keyframeImageUrl: '',
-        videoPrompt: '',
-        videoUrl: ''
-      }]
-      saveLocalStoryboards(localStoryboards.value)
-    }
+    localStoryboards.value = props.storyboards.map(s => ({ ...s }))
   }
 }
 
-// 监听本地分镜变化 - 只保存到localStorage，不向上emit（防止编辑时数据被覆盖）
-watch(localStoryboards, (newVal) => {
-  saveLocalStoryboards(newVal)
-}, { deep: true })
+onMounted(() => {
+  initFromProps()
+})
 
-// 监听 props.storyboards 变化（拆解新剧本时覆盖本地缓存）
+// 监听父组件分镜列表变化（如拆解剧本后传入新列表，分镜数量变、顺序变、全新一批都触发更新）。
+// 用 id 拼接字符串比对，只有分镜组合真正变了才更新，防止循环触发。
+// 只要任何一个分镜的 id 变了、顺序变了、数量变了 → 字符串就不一样！
+// 父组件重新拆解 → 分镜变成 [4,5,6] 字符串变成 '4,5,6' 和本地 '1,2,3' 不一样 → 触发更新！
 watch(() => props.storyboards, (newVal) => {
   if (newVal && newVal.length > 0) {
-    // 清除旧缓存，使用新数据
-    localStorage.removeItem('manju_local_storyboards')
-    isInitializingFromProps = true
-    localStoryboards.value = newVal.map(s => ({
-      id: generateId(),
-      description: s.description || '',
-      characters: s.characters || [],
-      scenePrompt: s.scenePrompt || '',
-      sceneImageUrl: '',
-      keyframePrompt: s.keyframePrompt || s.detailedDescription || '',
-      keyframeImageUrl: '',
-      videoPrompt: s.videoPrompt || s.keyframePrompt || s.detailedDescription || '',
-      videoUrl: ''
-    }))
-    saveLocalStoryboards(localStoryboards.value)
-    setTimeout(() => { isInitializingFromProps = false }, 0)
+    const newIds = newVal.map(s => s.id).join(',')
+    const currentIds = localStoryboards.value.map(s => s.id).join(',')
+    if (newIds !== currentIds) {
+      localStoryboards.value = newVal.map(s => ({ ...s }))
+    }
   }
 }, { deep: true })
 
+// 本地分镜变化时，通过事件发送给父组件，父组件收到后，会更新它自己维护的那份数据。
+watch(localStoryboards, (newVal) => {
+  emit('update-storyboards', newVal.map(s => ({ ...s })))
+}, { deep: true })
+
+// 组件销毁时关掉所有轮询定时器。如果不清除，组件已经销毁了但定时器还在后台跑，
+// 会继续发请求，还会尝试更新已不存在的组件数据，造成内存泄漏。
+// Js原生方法Object.keys()取出对象所有的key，forEach方法逐个清除。
+// onBeforeUnmount是 Vue 的生命周期钩子：组件即将被销毁、页面即将关闭 / 切换时，自动执行这里！
+onBeforeUnmount(() => {
+  // 1. 拿到所有存了定时器的 分镜ID（变成数组）
+  Object.keys(pollTimers).forEach(storyId => {
+    // 2. 根据ID找到对应的定时器，把它关掉！
+    clearInterval(pollTimers[storyId])
+    // 3. 关掉后，从对象里删掉这条记录（清理干净）
+    delete pollTimers[storyId]
+  })
+})
+// Object.keys() → 拿到所有 key（分镜 id） 
+// forEach → 一个一个关
+// clearInterval → 关闭定时器的固定写法
+
+// ========== 方法 ==========
 // 添加分镜
 const addStoryboard = () => {
-  localStoryboards.value.push({
-    id: generateId(),
-    description: '',
-    characters: [],
-    scenePrompt: '',
-    sceneImageUrl: '',
-    keyframePrompt: '',
-    keyframeImageUrl: '',
-    videoPrompt: '',
-    videoUrl: ''
-  })
-  setTimeout(() => {
-    const lastCard = document.querySelector('.storyboard-card:last-child')
-    lastCard?.scrollIntoView({ behavior: 'smooth', block: 'start' })
-  }, 100)
+  localStoryboards.value.push(createEmptyStoryboard())
 }
 
 // 删除分镜
-const removeStoryboard = (index) => {
-  localStoryboards.value.splice(index, 1)
-  if (localStoryboards.value.length === 0) addStoryboard()
+const removeStoryboard = (idx) => {
+  const story = localStoryboards.value[idx]
+  // 清除该分镜可能正在运行的视频轮询
+  // 先保证分镜存在，并且有 id，再保证这个分镜有正在运行的定时器
+  if(story?.id && pollTimers[story.id]){
+    clearInterval(pollTimers[story.id])
+    delete pollTimers[story.id]
+  }
+  // 释放可能残留的 loading 状态
+  if(videoLoading.value[idx] !== undefined){
+    delete videoLoading.value[idx]
+  }
+  localStoryboards.value.splice(idx, 1)
 }
 
-// 上传场景图（临时）
-const handleSceneUpload = (index, options) => {
-  const file = options.file
-  if (!file) return
-  const blobUrl = URL.createObjectURL(file)
-  localStoryboards.value[index].sceneImageUrl = blobUrl
-  ElMessage.success('场景图已临时加载，刷新后失效')
-  refreshPoints()
-}
-
-/**
- * 生成场景图
- * 作用：根据分镜中的场景描述提示词，调用AI绘图接口生成场景图片
- * 生成成功后直接赋值给当前分镜，并刷新用户积分
- * 
- * @param index - 当前分镜在数组中的下标（定位哪一个分镜）
- */
-const generateScene = async (index) => {
-  // 1. 根据下标获取当前要生成场景的分镜数据
-  const story = localStoryboards.value[index]
-
-  // 2. 前端校验：场景提示词不能为空，为空则提示并终止执行
-  if (!story.scenePrompt.trim()) {
-    errorMessage.value = '请输入场景提示词'
-    showErrorModal.value = true
+// 生成场景图
+const generateScene = async (idx) => {
+  const story = localStoryboards.value[idx]
+  if (!story.scenePrompt?.trim()) {
+    ElMessage.warning('请先输入场景提示词')
     return
   }
-
-  // 3. 开启当前分镜的loading状态，防止用户重复点击
-  sceneLoading.value[index] = true
-
+  sceneLoading.value[idx] = true
   try {
-    // 4. 调用后端API，传入场景提示词 + 风格声明，请求生成场景图
-    const res = await generateSceneApi(story.scenePrompt, props.styleDeclaration)
-
-    // 5. 判断接口返回状态：200 表示生成成功
+    const res = await generateSceneApi(story.scenePrompt, props.styleDeclaration || '')
     if (res.data.code === 200) {
-      // 6. 取出返回的图片地址（兼容对象/字符串两种格式）
-      let imageUrl = res.data.data
-      if (typeof imageUrl === 'object' && imageUrl.imageUrl !== undefined) {
-        imageUrl = imageUrl.imageUrl
-      }
-
-      // 7. 将生成好的图片URL赋值给当前分镜，页面自动渲染
-      story.sceneImageUrl = imageUrl
-
-      // 8. 提示用户生成成功
+      const url = extractImageUrl(res.data.data)
+      story.sceneImageUrl = url
       ElMessage.success('场景图生成成功')
-
-      // 9. 调用注入的方法，刷新用户积分（生成图片消耗积分）
-      refreshPoints()
-      refreshRecentHistory?.()
+      emit('generated')
     } else {
-      // 10. 后端返回失败，提示错误信息
-      errorMessage.value = res.data.msg || '生成失败，请稍后重试'
-      showErrorModal.value = true
+      showError(res.data.msg || '生成失败')
     }
   } catch (err) {
-    // 11. 网络异常或请求失败
-    errorMessage.value = '生成失败，请检查网络后重试'
-    showErrorModal.value = true
+    const msg = err?.response?.data?.msg || err.message || '生成失败，请稍后重试'
+    showError(msg)
+    console.error(err)
   } finally {
-    // 12. 无论成功失败，最终都会关闭当前分镜的loading状态
-    sceneLoading.value[index] = false
+    sceneLoading.value[idx] = false
   }
 }
 
 // 生成关键帧
-const generateKeyframe = async (index) => {
-  const story = localStoryboards.value[index]
-  if (!story.keyframePrompt.trim()) {
-    errorMessage.value = '请输入关键帧提示词'
-    showErrorModal.value = true
-    return
-  }
+const generateKeyframe = async (idx) => {
+  const story = localStoryboards.value[idx]
   if (!story.sceneImageUrl) {
-    errorMessage.value = '请先生成场景图'
-    showErrorModal.value = true
+    ElMessage.warning('请先生成场景图')
     return
   }
-  // 收集所有选中角色的图片URL（支持多角色关键帧生成）
-  const characterImageUrls = story.characters
+  // 收集该分镜涉及角色的已生成图片
+  // 如果用户没选角色，就用空数组代替
+  const charUrls = (story.characters || [])
+    // Js数组原生方法map：遍历数组的每一键，返回一个值组成的新数组
     .map(name => props.characterImages[name])
+    // Js数组原生方法filter：遍历数组，只保留满足条件的元素
+    // 过滤掉所有空的未定义等情况的false的无效值
     .filter(Boolean)
-  if (story.characters.length > 0 && characterImageUrls.length === 0) {
-    errorMessage.value = '请先生成角色图片'
-    showErrorModal.value = true
-    return
-  }
-
-  keyframeLoading.value[index] = true
+  keyframeLoading.value[idx] = true
   try {
-    const res = await generateKeyframeApi(story.keyframePrompt, characterImageUrls, story.sceneImageUrl)
+    const res = await generateKeyframeApi(
+      // 生成关键帧时的降级逻辑
+      // 优先用用户可能修改过的 keyframePrompt，如果为空就退回原始的 detailedDescription，都没有才传空字符串。
+      story.keyframePrompt || story.detailedDescription || '',
+      charUrls,
+      story.sceneImageUrl
+    )
     if (res.data.code === 200) {
-      let imageUrl = res.data.data
-      if (typeof imageUrl === 'object' && imageUrl.imageUrl !== undefined) {
-        imageUrl = imageUrl.imageUrl
-      }
-      story.keyframeImageUrl = imageUrl
+      const url = extractImageUrl(res.data.data)
+      story.keyframeImageUrl = url
       ElMessage.success('关键帧生成成功')
-      emit('keyframe-generated', { index, imageUrl: story.keyframeImageUrl })
-      refreshPoints()
-      refreshRecentHistory?.()
+      emit('generated')
     } else {
-      errorMessage.value = res.data.msg || '生成失败，请稍后重试'
-      showErrorModal.value = true
+      showError(res.data.msg || '生成失败')
     }
   } catch (err) {
-    errorMessage.value = '生成失败，请检查网络后重试'
-    showErrorModal.value = true
+    const msg = err?.response?.data?.msg || err.message || '生成失败，请稍后重试'
+    showError(msg)
+    console.error(err)
   } finally {
-    keyframeLoading.value[index] = false
+    keyframeLoading.value[idx] = false
   }
 }
 
-// 上传测试视频（仅用于本地测试，不调用后端）
-const handleVideoUpload = (index, options) => {
+// 生成视频（异步）
+const generateVideo = async (idx) => {
+  const story = localStoryboards.value[idx]
+  // 清除该分镜可能正在进行的旧轮询和旧视频
+  if (story?.id && pollTimers[story.id]) {
+    clearInterval(pollTimers[story.id])
+    delete pollTimers[story.id]
+  }
+
+  if (!story.keyframeImageUrl) {
+    ElMessage.warning('请先生成关键帧')
+    return
+  }
+
+  videoLoading.value[idx] = true
+  try {
+    const res = await createVideoTask(story.keyframeImageUrl, story.videoPrompt)
+    if (res.data.code === 200) {
+      const data = res.data.data
+      const taskId = data.taskId || data.task_id
+      if (taskId) {
+        startPolling(idx, taskId)
+        ElMessage.info('视频生成任务已提交，正在后台生成...')
+      }
+    } else {
+      showError(res.data.msg || '提交失败')
+      videoLoading.value[idx] = false
+    }
+  } catch (err) {
+    const msg = err?.response?.data?.msg || err.message || '提交失败，请稍后重试'
+    showError(msg)
+    console.error(err)
+    videoLoading.value[idx] = false
+  }
+}
+
+// 轮询方法（每15秒一次，最多80次，即20分钟）
+// idx = 分镜在数组里的下标
+// taskId = 后端返回的视频任务ID
+const startPolling = (idx, taskId) => {
+  // 1. 根据下标，拿到当前这个分镜对象
+  const story = localStoryboards.value[idx]
+  // 2. 从分镜对象里，拿到它的唯一ID id: Date.now()
+  const storyId = story?.id
+  if(!storyId) return
+  if (pollTimers[storyId]) {
+    clearInterval(pollTimers[storyId])
+    delete pollTimers[storyId]
+  }
+  // 超时计数器：每个定时器自己独立的计数器
+  let pollCount = 0
+  const MAX_POLL = 80
+  // 启动定时器，得到编号
+  // 定时器timer是一个编号，浏览器内部有一个全局定时器列表，每调用一次 setInterval
+  // 浏览器创建一个新的定时器，给这个定时器分配一个唯一的数字编号，例如 timer = 101
+  // 浏览器提供的全局原生方法setInterval和setTimeout
+  // setInterval(fn,ms) 每隔ms毫秒重复执行一次fn，返回定时器编号（数字），停止方法clearInterval(timer)
+  // setTimeout(fn,ms) 等待ms毫秒后只执行一次fn，返回定时器编号（数字），停止方法clearTimeout(timer)
+  const timer = setInterval(async () => {
+    // 每次查询，计数器+1
+    pollCount++
+    if (pollCount > MAX_POLL) {
+      clearInterval(timer)
+      // delete 只能删除对象的属性，不能删除普通变量，所以不能写 delete timer
+      delete pollTimers[storyId]
+      videoLoading.value[idx] = false
+      showError('视频生成超时，请稍后重试')
+      return
+    }
+
+    try {
+      const res = await queryVideoTask(taskId)
+      if (res.data.code === 200) {
+        const result = res.data.data
+        if (result.status === 'SUCCEEDED') {
+          clearInterval(timer)
+          delete pollTimers[storyId]
+          // 通过 storyId 找到当前分镜位置（可能因删除/排序而改变）
+          // Js原生方法findIndex遍历整个分镜数组，找到第一个id=storyId的分镜，返回它的下标
+          // 如果遍历完整个数组都没找到符合条件的，固定返回 -1
+          const targetIdx = localStoryboards.value.findIndex(s => s.id === storyId)
+          if (targetIdx !== -1) {
+            // 创建新的分镜对象替换数组中的分镜
+            // 复制原来分镜的所有属性，更新视频地址，兼容不同返回字段
+            const updated = { ...localStoryboards.value[targetIdx], videoUrl: result.videoUrl || result.video_url }
+            // splice 从哪个位置开始，删除几个元素，插入什么新元素
+            localStoryboards.value.splice(targetIdx, 1, updated)
+          }
+
+          videoLoading.value[idx] = false
+          ElMessage.success('视频生成完成')
+          emit('generated')
+        } else if (result.status === 'FAILED') {
+          clearInterval(timer)
+          delete pollTimers[storyId]
+          videoLoading.value[idx] = false
+          showError(result.error || '视频生成失败')
+        }
+      }
+    } catch (err) {
+      console.error('查询视频任务失败:', err)
+    }
+  }, 15000)
+  // 把定时器编号存进定时器集合
+  pollTimers[storyId] = timer
+}
+
+// 本地上传场景图
+const uploadScene = (idx, options) => {
   const file = options.file
   if (!file) return
-  if (!file.type.startsWith('video/')) {
-    errorMessage.value = '请选择视频文件'
-    showErrorModal.value = true
-    return
-  }
-  // 创建临时 URL
-  const blobUrl = URL.createObjectURL(file)
-  // 更新当前分镜的视频 URL
-  localStoryboards.value[index].videoUrl = blobUrl
-  ElMessage.success('测试视频已加载（刷新页面后失效）')
-}
 
-/**
- * 生成视频函数
- * 作用：根据分镜的关键帧图片和视频提示词，调用后端API发起视频生成任务，并轮询查询任务状态直到完成
- * 流程：
- * 1. 校验前置条件（是否有关键帧、提示词是否为空）
- * 2. 开启加载状态（防止重复点击）
- * 3. 调用后端API创建视频生成任务，获取任务ID
- * 4. 开启定时器轮询查询任务状态（每15秒查一次）
- * 5. 任务成功：赋值视频URL、关闭轮询、提示成功、刷新积分
- * 6. 任务失败：关闭轮询、提示错误
- * @param index 分镜在数组中的索引（用于定位当前是哪个分镜在生成视频）
- */
-const generateVideo = async (index) => {
-  // 1. 从响应式数组中获取当前分镜的数据
-  const story = localStoryboards.value[index]
-  // 2. 前置校验1：检查当前分镜是否已生成关键帧图片
-  if (!story.keyframeImageUrl) {
-    errorMessage.value = '请先生成关键帧'
-    showErrorModal.value = true
+  if (!file.type.startsWith('image/')) {
+    ElMessage.error('请上传图片文件')
     return
   }
-  // 3. 前置校验2：检查视频提示词是否为空（trim()去除首尾空格）
-  if (!story.videoPrompt.trim()) {
-    errorMessage.value = '请输入视频提示词'
-    showErrorModal.value = true
-    return
-  }
-  // 4. 开启当前分镜的加载状态（用于控制按钮loading效果，防止重复点击）
-  videoLoading.value[index] = true
 
-   try {
-    // 5. 调用后端API：创建视频生成任务
-    // 传入参数：关键帧图片URL、视频提示词
-    const res = await createVideoTask(story.keyframeImageUrl, story.videoPrompt)
-    // 6. 判断任务创建是否成功（后端统一返回code=200表示成功）
-    if (res.data.code === 200) {
-      // 7. 从返回结果中获取任务ID（后续轮询需要用这个ID查询状态）
-      const taskId = res.data.data.taskId
-      // 8. 提示用户：视频已开始生成，需要等待
-      ElMessage.info('视频生成中，请稍候...')
-      // 轮询：每15秒查询一次，最多80次（约20分钟）
-      let pollCount = 0
-      const MAX_POLL_COUNT = 80
-      // 存储interval引用，用于组件卸载时清理
-      pollIntervals[index] = setInterval(async () => {
-        pollCount++
-        if (pollCount >= MAX_POLL_COUNT) {
-          clearInterval(pollIntervals[index])
-          delete pollIntervals[index]
-          videoLoading.value[index] = false
-          ElMessage.error('视频生成超时，请稍后重试')
-          return
-        }
-        try {
-          const result = await queryVideoTask(taskId)
-          if (result.data.code === 200) {
-            // 11. 获取任务当前状态
-            // PENDING（排队中）→ RUNNING（处理中）→ SUCCEEDED（成功）/ FAILED（失败）
-            const status = result.data.data.status
-            // 12. 状态判断1：任务生成成功
-            if (status === 'SUCCEEDED') {
-              // 12.1 将生成的视频URL赋值给当前分镜（前端页面会自动显示视频）
-              story.videoUrl = result.data.data.videoUrl
-              // 12.2 清除定时器（停止轮询，避免无限查询）
-              clearInterval(pollIntervals[index])
-              delete pollIntervals[index]
-              // 12.3 提示用户生成成功
-              ElMessage.success('视频生成成功')
-              // 12.4 关闭当前分镜的加载状态
-              videoLoading.value[index] = false
-              // 12.5 刷新用户积分（因为生成视频消耗了积分）
-              refreshPoints()
-              refreshRecentHistory?.()
-              // 13. 状态判断2：任务生成失败
-            } else if (status === 'FAILED') {
-              // 13.1 清除定时器
-              clearInterval(pollIntervals[index])
-              delete pollIntervals[index]
-              // 13.2 提示用户失败原因（从后端返回的error字段获取）
-              ElMessage.error('视频生成失败：' + result.data.data.error)
-              // 13.3 关闭当前分镜的加载状态
-              videoLoading.value[index] = false
-            }
-            // 14. 其他状态（如PENDING）：不做处理，继续下一次轮询
-          }
-        } catch (err) {
-          // 15. 轮询过程中出错：打印错误日志（不中断轮询，继续尝试）
-          console.error('轮询出错', err)
-        }
-      }, 15000) // 15000毫秒 = 15秒
-    } else {
-      // 16. 任务创建失败：提示后端返回的错误信息
-      errorMessage.value = res.data.msg || '发起视频生成失败'
-      showErrorModal.value = true
-      // 17. 关闭当前分镜的加载状态
-      videoLoading.value[index] = false
-    }
-  } catch (err) {
-    // 18. 发起视频生成请求时出错（如网络错误）：提示用户
-    errorMessage.value = '发起视频生成失败，请检查网络后重试'
-    showErrorModal.value = true
-    // 19. 关闭当前分镜的加载状态
-    videoLoading.value[index] = false
+  const reader = new FileReader()
+  reader.onload = (e) => {
+    localStoryboards.value[idx].sceneImageUrl = e.target.result
+    ElMessage.success('上传成功')
   }
+  reader.onerror = () => {
+    ElMessage.error('上传失败')
+  }
+  reader.readAsDataURL(file)
 }
 
 // 预览所有视频
-const hasVideos = computed(() => localStoryboards.value.some(s => s.videoUrl))
+const previewVideo = async () => {
+  // 找到所有有视频的分镜的下标
+  const videoIndices = localStoryboards.value
+    // s 数组里的每一个分镜对象 i 这个分镜在数组里的位置（下标）
+    .map((s, i) => s.videoUrl ? i : -1)
+    .filter(i => i !== -1)
 
+  if (videoIndices.length === 0) {
+    ElMessage.warning('没有可预览的视频')
+    return
+  }
 
+  previewDialogVisible.value = true
+  await nextTick()                    // 等待对话框和视频元素渲染
+  currentPreviewIndex.value = 0
+  playVideoAtIndex(videoIndices[0])   // 从第一个视频开始播放
+}
+// 播放指定下标的视频方法
+const playVideoAtIndex = (idx) => {
+  const story = localStoryboards.value[idx]
+  // 安全判断：分镜有视频 且 视频元素存在
+  if (!story?.videoUrl || !previewPlayerRef.value) return
+  // video元素原生方法
+  previewPlayerRef.value.src = story.videoUrl // 设置视频地址
+  previewPlayerRef.value.load()               // 重新加载视频
+  previewPlayerRef.value.play()               // 开始播放 
+
+  // 监听播放结束事件，自动切下一个
+  // onended 事件监听，当视频播放到最后一秒时，自动触发这个函数。
+  previewPlayerRef.value.onended = () => {
+    // 找下一个有视频的分镜
+    let nextIdx = idx + 1
+    while (nextIdx < localStoryboards.value.length) {
+      if (localStoryboards.value[nextIdx].videoUrl) {
+        currentPreviewIndex.value = nextIdx
+        playVideoAtIndex(nextIdx)
+        return
+      }
+      nextIdx++
+    }
+    // 播放完毕，清除监听，提示用户
+    previewPlayerRef.value.onended = null
+    ElMessage.success('所有视频播放完毕')
+  }
+}
 
 // 停止预览
 const stopPreview = () => {
   if (previewPlayerRef.value) {
-    previewPlayerRef.value.pause()
-    previewPlayerRef.value.src = ''
-    // 移除事件监听，避免残留
-    previewPlayerRef.value.onended = null
-    previewPlayerRef.value.onerror = null
-  }
-  previewDialogVisible.value = false
-  isPreviewing = false
-}
-
-// 播放单个视频
-const playPreviewVideo = () => {
-  if (!previewPlayerRef.value) {
-    // 如果播放器还没渲染，等待一下
-    setTimeout(playPreviewVideo, 100)
-    return
-  }
-  if (previewIndex >= previewVideoList.length) {
-    // 播放完成：重置到第一个视频，暂停，保持弹窗打开
-    if (previewVideoList.length > 0) {
-      const firstVideoUrl = previewVideoList[0]
-      // 如果当前播放器的 src 不是第一个视频，则重新加载
-      if (previewPlayerRef.value.src !== firstVideoUrl) {
-        previewPlayerRef.value.src = firstVideoUrl
-        // 等待元数据加载完成后，将当前时间设为 0 并暂停
-        previewPlayerRef.value.onloadedmetadata = () => {
-          previewPlayerRef.value.currentTime = 0
-          previewPlayerRef.value.pause()
-        }
-      } else {
-        // 已经是第一个视频，只需重置时间和暂停
-        previewPlayerRef.value.currentTime = 0
-        previewPlayerRef.value.pause()
-      }
-    }
-    // 重置播放状态，但不关闭弹窗
-    isPreviewing = false
-    previewIndex = 0
-    // 不清空 previewVideoList，以便再次点击播放
-    ElMessage.success('播放完成')
-    return  
-  }
-  // 正常播放逻辑
-  const currentUrl = previewVideoList[previewIndex]
-  previewPlayerRef.value.src = currentUrl
-  previewPlayerRef.value.play()
-  previewPlayerRef.value.onended = () => {
-    previewIndex++
-    playPreviewVideo()
-  }
-  previewPlayerRef.value.onerror = () => {
-    ElMessage.error(`视频 ${previewIndex+1} 加载失败，跳过`)
-    previewIndex++
-    playPreviewVideo()
+    previewPlayerRef.value.onended = null  // 清除监听
+    previewPlayerRef.value.pause()         // 暂停播放
+    previewPlayerRef.value.src = ''        // 清空视频地址
   }
 }
 
-// 预览所有视频
-const previewAllVideos = async () => {
-  // 防止重复调用
-  if (isPreviewing) {
-    ElMessage.warning('正在播放中，请稍后')
-    return
-  }
-  const videoUrls = localStoryboards.value.map(s => s.videoUrl).filter(Boolean)
-  if (!videoUrls.length) {
-    ElMessage.warning('暂无视频可预览')
-    return
-  }
-  // 如果已有对话框打开，先关闭
-  if (previewDialogVisible.value) {
-    stopPreview()
-    await nextTick()
-  }
-  previewVideoList = videoUrls
-  previewIndex = 0
-  previewDialogVisible.value = true
-  isPreviewing = true
-  // 等待 DOM 更新，确保播放器元素存在
-  await nextTick()
-  playPreviewVideo()
-}
+// 合并下载所有视频（单个视频失败时跳过，其余正常打包）
+const downloadVideos = async () => {
+  // 收集所有有视频的分镜
+  const videos = localStoryboards.value
+    // 所有分镜 → 转换成 {url, index} 对象
+    .map((s, i) => ({ url: s.videoUrl, index: i + 1 }))
+    // 只保留有视频的对象
+    .filter(v => v.url)
 
-// 下载所有视频
-const downloadAllVideos = async () => {
-  const videoItems = localStoryboards.value
-    .map((s, idx) => ({ url: s.videoUrl, idx }))
-    .filter(item => item.url)
-  if (!videoItems.length){
-    errorMessage.value = '没有可下载的视频'
-    showErrorModal.value = true
+  if (videos.length === 0) {
+    ElMessage.warning('没有可下载的视频')
     return
   }
+
+  ElMessage.info(`正在打包 ${videos.length} 个视频，请稍候...`)
 
   const zip = new JSZip()
-  let successCount = 0
-  for (const item of videoItems) {
+  const failedList = []
+  // 逐个下载视频，添加到ZIP包
+  // for...of 用来一个一个取出数组里的每一项，每次循环把当前项赋值给 video 变量
+  for (const video of videos) {
     try {
-      const res = await fetch(item.url)
-      if (!res.ok) throw new Error('下载失败')
-      const blob = await res.blob()
-      zip.file(`分镜${item.idx+1}_视频.mp4`, blob)
-      successCount++
+      // fetch(video.url)：向服务器发送一个 HTTP 请求 下载单个视频
+      const response = await fetch(video.url)
+      // 判断HTTP请求是否成功
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`)
+      }
+      // blob 是浏览器里的二进制大对象，用来存储文件、图片、视频等二进制数据。
+      // response.blob()：把服务器返回的二进制数据转换成 blob 对象
+      const blob = await response.blob()  
+      // zip.file(..., blob)：把 blob 对象添加到 ZIP 包中
+      zip.file(`分镜${video.index}_视频.mp4`, blob)
     } catch (err) {
-      console.error(`下载分镜${item.idx+1}视频失败:`, err)
-      ElMessage.warning(`分镜${item.idx+1}视频下载失败，已跳过`)
+      console.error(`分镜${video.index} 下载失败:`, err)
+      failedList.push(video.index)    // 单个失败，记录下来，继续下载下一个
     }
   }
-  if (successCount === 0) {
-    errorMessage.value = '没有成功下载任何视频'
-    showErrorModal.value = true
+
+  // 如果全部失败
+  if (failedList.length === videos.length) {
+    ElMessage.error('所有视频下载失败，请检查网络')
     return
   }
-  const content = await zip.generateAsync({ type: 'blob' })
-  saveAs(content, `漫剧分镜视频_${Date.now()}.zip`)
-  ElMessage.success(`已打包 ${successCount} 个视频文件`)
+
+  // 如果有部分失败，提示用户
+  if (failedList.length > 0) {
+    ElMessage.warning(`分镜 ${failedList.join('、')} 下载失败，其余已打包`)
+  }
+
+  try {
+    // 生成ZIP文件
+    const zipBlob = await zip.generateAsync({ type: 'blob' })
+    // 触发浏览器下载
+    saveAs(zipBlob, '漫剧分镜视频合集.zip')
+    ElMessage.success('下载完成')
+  } catch (err) {
+    console.error('打包下载失败:', err)
+    ElMessage.error('打包失败，请重试')
+  }
 }
 
-onMounted(() => {
-  initData()
-})
+// 显示错误弹窗
+const showError = (msg) => {
+  errorMessage.value = msg
+  showErrorModal.value = true
+}
 </script>
 
 <style scoped>
@@ -750,7 +706,7 @@ onMounted(() => {
 }
 .card-content {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: wrap;   /* 自动换行 */
   gap: 16px;
   justify-content: space-between;
 }
@@ -769,7 +725,7 @@ onMounted(() => {
 }
 .image-box {
   width: 100%;
-  aspect-ratio: 16 / 9;
+  aspect-ratio: 16 / 9;     /* 通用宽高比 */
   background: #f5f5f5;
   border-radius: 4px;
   display: flex;
@@ -792,26 +748,14 @@ onMounted(() => {
 .hint {
   font-size: 12px;
   color: #e6a23c;
-  margin-top: 4px;
 }
 .add-button-container {
   margin-top: 20px;
   text-align: center;
 }
-.add-storyboard-btn{
-  display:inline-flex;
-  align-items: center;
-  justify-content: center;
-}
-.button-group {
-  display: flex;
-  gap: 8px;
-  margin-top: 8px;
-}
-.button-group .upload-btn,
-.button-group .el-button {
-  flex: 1;
-  min-width: 0;
-}
 
+.button-row {
+  display: flex;
+  justify-content: space-between;
+}
 </style>

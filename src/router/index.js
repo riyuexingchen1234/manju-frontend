@@ -1,45 +1,30 @@
-// 导入Vue Router核心函数：
-// createRouter：用于创建路由实例
-// createWebHistory：用于创建HTML5 History模式的路由（URL中没有#号，更美观）
+// 前端路由配置文件，使用 Vue Router 创建单页面应用的路由表
+// 包含登录、注册、首页等基础页面的路径映射，并设置全局守卫（目前放行所有路由）
 import { createRouter, createWebHistory } from "vue-router"
 import Login from "@/views/Login.vue"
 import Home from '@/views/Home.vue'
 
-// 定义路由配置数组
-// 每个路由对象包含：path（URL路径）、component（对应的页面组件）
 const routes = [
-    { path: '/', component: Home },           // 根路径直接进入主页
+    // 根路径，默认展示 Home 组件
+    { path: '/', component: Home },
+    // 登录页，用于输入账号密码
     { path: '/login', component: Login },
+    // 注册页，使用延迟加载便于等待首屏质量
     { path: '/register', component: () => import('@/views/Register.vue') },
-    { path: '/home', component: Home }        // 保留 /home 也可以访问
+    // 其他页面的别名，用于兼容旧链接
+    { path: '/home', component: Home }
 ]
-// 创建路由实例
+// 创建 Vue Router 实例，使用 HTML5 History（无 #）模式并挂载路由表 routes
 const router = createRouter({
-    history: createWebHistory(),    // 使用HTML5 History模式（需要后端配合支持，开发阶段Vite已自动支持）
-    routes                       // 传入上面定义的路由配置数组
+    history: createWebHistory(),
+    routes
 })
 
-// 全局前置路由守卫
-// 作用：在每次路由跳转前执行，用于控制页面访问权限（如：已登录用户不能再进登录页）
-// 参数说明：
-// - to：即将要进入的目标路由对象（要去哪）
-// - from：当前导航正要离开的路由对象（从哪来）
-// - next：必须调用的函数，用于放行或重定向（不调用next()，路由就不会跳转）
+// 路由守卫：不做任何拦截，全部放行，所有路由都直接转发到目标组件
+// 登录状态的重新获取由 Home.vue 的 onMounted 处理
+// 已登录用户访问 /login 可在 Login.vue 内部自行处理
 router.beforeEach((to, from, next) => {
-    // 1. 从localStorage中获取用户信息（判断用户是否已登录）
-    // 登录成功后，前端会把用户信息存入localStorage
-    const user = localStorage.getItem('user')
-    // 2. 权限判断逻辑：
-    // 如果用户已登录 且 试图进入登录页 → 重定向到主页（防止已登录用户重复登录）
-    if (user && to.path === '/login') {
-        next('/home')   // 重定向到 /home
-    } else {
-        // 其他所有情况都放行：
-        // - 未登录用户访问 / 或 /home：放行（支持未登录试用功能）
-        // - 已登录用户访问 /home：放行
-        // - 未登录用户访问 /login：放行
-        next()
-    }
+    next()
 })
-// 导出路由实例（需要在 main.js 中引入并挂载到Vue应用上）
+
 export default router

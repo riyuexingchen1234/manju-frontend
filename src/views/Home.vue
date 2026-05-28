@@ -1,6 +1,6 @@
 <template>
   <div class="app-root">
-    <!-- ===== 顶部毛玻璃导航栏 ===== -->
+    <!-- ===== 顶部毛玻璃导航栏 ===== 动态生成导航 -->
     <nav class="navbar">
       <div class="navbar-container">
         <div class="navbar-left">
@@ -32,13 +32,13 @@
           </button>
           <template v-if="user.id">
             <div class="user-menu" ref="userMenuRef">
-            <!-- 用户图标（首字母） -->
+            <!-- 用户图标：取首字母 username.charAt(0)  click.stop点击事件+阻止冒泡，防止点击头像时，卡片刚打开就关闭-->
              <div class="user-avatar" @click.stop="toggleUserCard">{{ username.charAt(0) }}</div>
              <!-- 点击卡片 -->
               <div v-show="showUserCard" class="user-card" @click.stop>
                 <div class="user-card-header">
                   <span class="user-card-name">{{ username }}</span>
-                  <button class="user-card-logout" @click="logout">退出</button>
+                  <button class="user-card-logout" @click="handleLogout">退出</button>
                 </div>
                 <div class="user-card-points">
                   <i class="fa fa-diamond"></i> 积分: {{ points }}
@@ -54,12 +54,12 @@
                     :class="{ 'history-failed': item.status === 'failed','history-pending' : item.status === 'pending' }"
                   >
                     <span class="history-tool">{{ formatToolName(item.tool) }}</span>
-                    <!-- 优先显示AI生成的结果，没有则显示用户输入 -->
+                    <!-- 预览内容（3种情况） 优先显示AI生成的结果，没有则显示用户输入 -->
                     <span v-if="item.resultText" class="history-preview">{{ formatResultText(item.tool, item.resultText) }}</span>
                     <span v-else-if="item.resultUrl" class="history-preview">查看图片/视频</span>
                     <span v-else class="history-preview">{{ item.inputPreview }}</span>
                     <span class="history-status">{{ item.status === 'pending' ? '生成中' : '' }}</span>
-                    <span class="history-time">{{ formatTime(item.createdAt) }}</span>
+                    <span class="history-time">{{ formatRelativeTime(item.createdAt) }}</span>
                   </div>
                 </div>
                 <div class="user-card-divider"></div>
@@ -70,8 +70,8 @@
             </div>
           </template>
           <template v-else>
-            <el-button type="text" class="login-btn" @click="goToRegister">注册</el-button>
-            <el-button type="text" class="login-btn" @click="goToLogin">登录</el-button>
+            <el-button link class="login-btn" @click="goToRegister">注册</el-button>
+            <el-button link class="login-btn" @click="goToLogin">登录</el-button>
           </template>
         </div>
       </div>
@@ -102,10 +102,10 @@
       </div>
     </section>
 
-    <!-- ===== 工作区区域（直接接在Hero下面，去掉了中间的功能卡片） ===== -->
+    <!-- ===== 工作区区域 ===== -->
     <section class="workspace-section">
       <div class="section-container">
-        <!-- 1. 剧本生成 - 粉橙主题色 -->
+        <!-- 1. 剧本生成 - 粉橙主题色 页面滚动到这个区块时，顶部留出 80px 的空隙-->
         <section id="script" class="workspace-card workspace-script" style="scroll-margin-top: 80px;">
           <div class="workspace-header">
             <div class="ws-icon ws-icon-script">
@@ -116,6 +116,7 @@
             <span class="ws-note">⚠️ 内容不会长期保存，请及时下载</span>
           </div>
           <div class="workspace-body">
+            <!-- 子组件 emit('script-generated') 父组件 @script-generated 监听到 执行方法-->
             <ScriptWorkspace @script-generated="handleScriptGenerated" />
           </div>
         </section>
@@ -149,8 +150,9 @@
             <CharacterWorkspace
               :characters="characters"
               :characterImages="characterImages"
+              :styleDeclaration="styleDeclaration"
               @character-generated="handleCharacterGenerated"
-              @update-characters="(newList) => characters = newList"
+              @update-characters="handleCharactersUpdate"
             />
           </div>
         </section>
@@ -171,6 +173,8 @@
               :characters="characters"
               :characterImages="characterImages"
               :styleDeclaration="styleDeclaration"
+              @update-storyboards="handleStoryboardsUpdate"
+              @generated="handleStoryboardGenerated"
             />
           </div>
         </section>
@@ -199,11 +203,18 @@
           <i class="fa fa-times"></i>
         </button>
       </div>
+      <!-- 标签页容器（大框架） -->
       <el-tabs v-model="inspireTab" class="inspire-tabs">
+        <!-- 单个标签页面板（一页内容）
+         name是当前标签的唯一标识名（字符串）规则：同一个 el-tabs 下，每个 el-tab-pane 的 name 必须不一样 -->
         <el-tab-pane label="漫剧榜单" name="rank">
+          <!-- 表格组件 stripe:斑马纹表格，奇偶行背景色交替 -->
           <el-table :data="rankList" stripe style="width: 100%" v-loading="rankLoading">
+            <!-- 表格列定义 -->
             <el-table-column prop="title" label="作品名" />
             <el-table-column prop="hotValue" label="热度值" width="100">
+              <!-- #default:表格单元格默认插槽，用来自定义单元格内容,单纯文字直接用 prop 就行；要加样式、拼接内容、做判断，就用插槽。 
+               有数据自动显示表格，无数据自动显示empty里的内容 不用if else -->
               <template #default="scope">
                 <span class="hot-value">{{ scope.row.hotValue }}</span>
               </template>
@@ -216,8 +227,8 @@
         <el-tab-pane label="小说 IP 搜索" name="search">
           <div class="search-line">
             <el-input v-model="searchKeyword" placeholder="输入关键词，如：修仙、穿越" clearable />
-            <el-button type="primary" @click="searchNovel" :loading="searchLoading">搜索</el-button>
-          </div>
+            <el-button type="primary" @click="searchNovelHandle" :loading="searchLoading">搜索</el-button>
+          </div> <!-- 用户搜索后，有数据显示表格，无数据显示空 -->
           <el-table v-if="novelList.length" :data="novelList" stripe style="width: 100%; margin-top: 12px;">
             <el-table-column prop="title" label="书名" />
             <el-table-column prop="author" label="作者" width="100" />
@@ -229,9 +240,10 @@
           <div class="search-line">
             <el-input v-model="analyzeWorkName" placeholder="输入作品名，如：庆余年" clearable />
             <el-button type="primary" @click="analyze" :loading="analyzeLoading">分析</el-button>
-          </div>
+          </div> <!-- 用户点击分析后，有数据显示卡片，无数据显示空 -->
           <el-card v-if="analysisResult" shadow="hover" class="analysis-card">
             <div class="analysis-grid">
+              <!-- 遍历对象，将里面的键值对一行行展示在页面上 -->
               <div v-for="(val, key) in analysisResult" :key="key" class="analysis-cell">
                 <span class="cell-key">{{ key }}</span>
                 <span class="cell-val">{{ val }}</span>
@@ -280,14 +292,15 @@
           <!-- 用户输入 -->
           <div class="history-col history-col-input">
             <div class="history-text-wrapper">
+              <!-- pre标记 保留文本格式 -->
               <pre class="history-text" :title="item.inputPreview">{{ item.inputPreview || '无' }}</pre>
+              <!-- 复制用户输入内容按钮 -->
               <button 
                 v-if="item.inputPreview" 
                 class="history-copy-btn" 
                 @click="copyToClipboard(item.inputPreview)"
                 title="复制"
-              >
-                <i class="fa fa-copy"></i>
+              ><i class="fa fa-copy"></i>
               </button>
             </div>
           </div>
@@ -334,6 +347,7 @@
           
           <!-- 状态 -->
           <div class="history-col history-col-status">
+            <!-- 动态绑定class，判断不同状态显示不同结果 -->
             <span class="history-status" :class="`status-${item.status}`">
               {{ item.status === 'success' ? '成功' : item.status === 'pending' ? '生成中' : '失败' }}
             </span>
@@ -341,19 +355,20 @@
           
           <!-- 时间 -->
           <div class="history-col history-col-time">
-            <span class="history-time">{{ formatTime(item.createdAt) }}</span>
+            <span class="history-time">{{ formatRelativeTime(item.createdAt) }}</span>
           </div>
         </div>
       </div>
-      
+      <!-- 历史记录弹窗 分页器 -->
       <div v-if="historyTotal > historySize" class="history-dialog-pagination">
+        <!-- el-pagination Element Plus 分页组件 layout 只显示：上一页、页码、下一页 -->
         <el-pagination
           :current-page="historyPage"
           :page-size="historySize"
           :total="historyTotal"
-          layout="prev, pager, next"
+          layout="prev, pager, next"  
           @current-change="handlePageChange"
-        />
+        />  
       </div>
     </el-dialog>
 
@@ -424,446 +439,364 @@
 </template>
 
 <script setup>
-import { ref, onMounted, provide, watch, onUnmounted, onBeforeUnmount, nextTick } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-// 引入业务逻辑相关
 import { getPoints, logout as logoutApi } from '@/api/user'
-import { getRecentHistory,getHistoryList } from '@/api/history'
-import { searchNovel as searchNovelApi, getRank, analyzeWork } from '@/api/assist'
+import { getRecentHistory, getHistoryList } from '@/api/history'
+import { searchNovel, getRank, analyzeWork } from '@/api/assist'
 import {
   loadCharacters, saveCharacters,
-  loadLocalStoryboards, saveLocalStoryboards,
   loadCharacterImages, saveCharacterImages,
+  loadLocalStoryboards, saveLocalStoryboards,
+  loadStyleDeclaration, saveStyleDeclaration,
   clearAllStorage
 } from '@/utils/storage'
-
-// 引入子组件
 import ScriptWorkspace from './components/ScriptWorkspace.vue'
 import ParseWorkspace from './components/ParseWorkspace.vue'
 import CharacterWorkspace from './components/CharacterWorkspace.vue'
 import StoryboardWorkspace from './components/StoryboardWorkspace.vue'
 
 const router = useRouter()
-
-// 导航方法
-const goToLogin = () => {
-  console.log('goToLogin called, router:', router)
-  router.push('/login')
-}
-const goToRegister = () => {
-  console.log('goToRegister called')
-  router.push('/register')
+// 统一解包 API 响应，code !== 200 时抛出异常
+const unwrap = async (promise) => {
+  const res = await promise
+  if (res.data.code === 200) return res.data.data
+  throw new Error(res.data.msg || '请求失败')
 }
 
-// ========== 核心业务逻辑（完全保留） ==========
-const user = JSON.parse(localStorage.getItem('user') || '{}')
-const username = ref(user.username || '')
-const points = ref(0)
-
-// 用户卡片相关
+// ========== 用户状态 ==========
+const user = ref({})
+const username = computed(() => user.value.username || '')
+const points = computed(() => user.value.points ?? '--')
 const showUserCard = ref(false)
-const recentHistory = ref([])
 const userMenuRef = ref(null)
-let clickOutsideListener = null  // 存储监听器引用
 
-// 切换用户卡片显示
-const toggleUserCard = () => {
-  if (showUserCard.value) {
-    // 已显示，则关闭并移除监听器
-    showUserCard.value = false
-    removeClickOutsideListener()
-  } else {
-    // 未显示，则打开并添加监听器
-    showUserCard.value = true
-    addClickOutsideListener()
-  }
-}
+// ========== 导航 ==========
+const navItems = [
+  { id: 'script', label: '剧本生成' },
+  { id: 'parse', label: '拆解剧本' },
+  { id: 'character', label: '角色生成' },
+  { id: 'storyboard', label: '分镜生成' }
+]
+const activeNav = ref('')
 
-// 添加点击外部监听
-const addClickOutsideListener = () => {
-  // 先移除旧的，避免重复注册
-  removeClickOutsideListener()
-  setTimeout(() => {
-    clickOutsideListener = (event) => {
-      // 忽略 el-dialog 弹窗内的点击事件
-      if (event.target.closest('.el-dialog')) return
-      if (!userMenuRef.value || !userMenuRef.value.contains(event.target)) {
-        showUserCard.value = false
-        removeClickOutsideListener()
-      }
-    }
-    document.addEventListener('click', clickOutsideListener)
-  }, 0)
-}
+// ========== 跨工作区共享数据 ==========
+const characters = ref([])
+const characterImages = ref({})
+const storyboards = ref([])
+const styleDeclaration = ref('')
 
-// 移除点击外部监听
-const removeClickOutsideListener = () => {
-  if (clickOutsideListener) {
-    document.removeEventListener('click', clickOutsideListener)
-    clickOutsideListener = null
-  }
-}
-
-// 关闭用户卡片
-const closeUserCard = () => {
-  showUserCard.value = false
-  removeClickOutsideListener()
-}
-
-// 组件卸载时清理
-onBeforeUnmount(() => {
-  removeClickOutsideListener()
-})
-
-// 历史记录弹窗相关
+// ========== 历史记录 ==========
+const recentHistory = ref([])
 const historyDialogVisible = ref(false)
 const historyList = ref([])
 const historyTotal = ref(0)
 const historyPage = ref(1)
 const historySize = ref(20)
-const expandedHistoryId = ref(null)  // 当前展开的历史记录ID
 
-// 切换历史记录展开/收起
-const toggleHistoryExpand = (id) => {
-  expandedHistoryId.value = expandedHistoryId.value === id ? null : id
-}
+// ========== 灵感助手 - 状态变量 ==========
+const inspireVisible = ref(false)      // 控制【灵感助手弹窗】的显示/隐藏（true=显示，false=隐藏）
+const inspireLoading = ref(false)      // 【灵感助手按钮】的加载状态（点击时转圈圈）
+const inspireTab = ref('rank')         // 控制弹窗内的标签页：rank=漫剧榜单 / search=小说搜索 / analyze=对标拆解
+// 漫剧榜单
+const rankList = ref([])               // 存储【漫剧榜单】的数据列表（数组）
+const rankLoading = ref(false)         // 【漫剧榜单】表格的加载状态（获取数据时显示loading）
+// 小说 IP 搜索
+const searchKeyword = ref('')          // 存储【小说搜索】输入框的关键词
+const novelList = ref([])              // 存储【小说搜索】返回的结果列表
+const searchLoading = ref(false)       // 【小说搜索】按钮的加载状态
+// 对标拆解
+const analyzeWorkName = ref('')        // 存储【对标拆解】输入的作品名称
+const analysisResult = ref(null)       // 存储【对标拆解】返回的分析结果（对象）
+const analyzeLoading = ref(false)       // 【对标拆解】分析按钮的加载状态
 
-// 复制到剪贴板
-const copyToClipboard = (text) => {
-  navigator.clipboard.writeText(text).then(() => {
-    ElMessage.success('已复制到剪贴板')
-  }).catch(() => {
-    // 降级方案
-    const textarea = document.createElement('textarea')
-    textarea.value = text
-    document.body.appendChild(textarea)
-    textarea.select()
-    document.execCommand('copy')
-    document.body.removeChild(textarea)
-    ElMessage.success('已复制到剪贴板')
-  })
-}
+// ========== 教程 ==========
+const showTutorial = ref(false)
 
-// 下载媒体文件
-const downloadMedia = (url) => {
-  const a = document.createElement('a')
-  a.href = url
-  a.download = url.split('/').pop() || 'download'
-  document.body.appendChild(a)
-  a.click()
-  document.body.removeChild(a)
-}
-
-// 判断是否是视频URL（兼容带参数的URL）
-const isVideoUrl = (url) => {
-  if (!url) return false
-  return /\.(mp4|webm|ogg|mov)(?:\?.*)?$/i.test(url)
-}
-
-// 判断是否是图片URL（不是视频的就是图片，兼容CDN链接）
-const isImageUrl = (url) => {
-  if (!url) return false
-  return !/\.(mp4|webm|ogg|mov)(?:\?.*)?$/i.test(url)
-}
-
-// 工具名称映射
-const toolNameMap = {
-  'script_generate': '剧本生成',
-  'parse_script': '拆解剧本',
-  'character_generate': '角色生成',
-  'scene_generate': '场景生成',
-  'keyframe_generate': '关键帧生成',
-  'video_generate': '视频生成'
-}
-
-const formatToolName = (tool) => toolNameMap[tool] || tool
-
-// 相对时间格式化
-const formatTime = (dateStr) => {
-  if (!dateStr) return ''
-  const date = new Date(dateStr)
-  const now = new Date()
-  const diff = now - date
-  const oneDay = 24 * 60 * 60 * 1000
-  
-  if (diff < oneDay && date.getDate() === now.getDate()) {
-    return `今天 ${date.getHours().toString().padStart(2, '0')}:${date.getMinutes().toString().padStart(2, '0')}`
-  } else if (diff < 2 * oneDay && date.getDate() === now.getDate() - 1) {
-    return `昨天 ${date.getHours().toString().padStart(2, '0')}:${date.getMinutes().toString().padStart(2, '0')}`
-  } else {
-    return `${date.getMonth() + 1}月${date.getDate()}日`
-  }
-}
-
-// 格式化AI生成的结果文本
-const formatResultText = (tool, resultText) => {
-  if (!resultText) return ''
-  // 剧本生成：提取标题（格式通常是"《xxx》"）
-  if (tool === 'script_generate') {
-    const match = resultText.match(/《([^》]+)》/)
-    if (match) return match[1]
-    // 没有标题时，截取前30字
-    return resultText.substring(0, 30) + (resultText.length > 30 ? '...' : '')
-  }
-  // 拆解剧本：截取前30字
-  if (tool === 'parse_script') {
-    return resultText.substring(0, 30) + (resultText.length > 30 ? '...' : '')
-  }
-  // 其他类型直接截取
-  return resultText.substring(0, 30) + (resultText.length > 30 ? '...' : '')
-}
-
-// 获取最近历史记录
-const fetchRecentHistory = async () => {
-  if (!user.id) return
-  try {
-    const res = await getRecentHistory(5)
-    if (res.data.code === 200) {
-      recentHistory.value = res.data.data
+// ========== 初始化 ==========
+onMounted(async () => {
+  // 1. 恢复用户信息
+  const userStr = localStorage.getItem('user')
+  if (userStr) {
+    try {
+      user.value = JSON.parse(userStr)
+    } catch {
+      localStorage.removeItem('user')
     }
-  } catch (err) {
-    console.error('获取最近历史失败:', err)
   }
-}
 
-// 打开历史记录弹窗
-const openHistoryDialog = () => {
-  // 关闭用户卡片
-  showUserCard.value = false
-  // 关闭外部点击监听
-  if (clickOutsideListener) {
-    document.removeEventListener('click', clickOutsideListener)
-    clickOutsideListener = null
-  }
-  // 打开弹窗并获取数据
-  historyDialogVisible.value = true
-  fetchHistoryList()
-}
-
-// 获取全部历史记录
-const fetchHistoryList = async () => {
-  if (!user.id) return
-  try {
-    const res = await getHistoryList(historyPage.value, historySize.value)
-    if (res.data.code === 200) {
-      historyList.value = res.data.data.list || []
-      historyTotal.value = res.data.data.total || 0
+  // 2. 验证 session 并刷新积分 + 加载最近历史
+  if (user.value.id) {
+    try {
+      user.value.points = await unwrap(getPoints())
+    } catch {
+      user.value = {}
+      localStorage.removeItem('user')
+      clearAllStorage()
     }
-  } catch (err) {
-    console.error('获取历史记录失败:', err)
+        await loadRecentHistory()
   }
-}
 
-// 分页切换
-const handlePageChange = (page) => {
-  historyPage.value = page
-  fetchHistoryList()
-}
+  // 4. 恢复工作区数据
+  characters.value = loadCharacters()
+  characterImages.value = loadCharacterImages()
+  storyboards.value = loadLocalStoryboards()
+  styleDeclaration.value = loadStyleDeclaration()
 
-// 初始化数据
-const characters = ref(loadCharacters())
-const storyboards = ref(loadLocalStoryboards())
-const characterImages = ref(loadCharacterImages())
-const styleDeclaration = ref('')
+  // 5. 点击外部关闭用户卡片
+  document.addEventListener('click', handleClickOutside)
 
-// 自动保存
-watch(characters, (newVal) => saveCharacters(newVal), { deep: true })
-watch(storyboards, (newVal) => saveLocalStoryboards(newVal), { deep: true })
-watch(characterImages, (newVal) => saveCharacterImages(newVal), { deep: true })
+  // 6. 监听其他标签页的 localStorage 变更
+  window.addEventListener('storage', handleStorageChange)
+})
 
-// 积分相关
-const fetchPoints = async () => {
-  if (!user.id) return
-  try {
-    const res = await getPoints()
-    if (res.data.code === 200) {
-      points.value = res.data.data
-    }
-  } catch (err) {
-    console.error('获取积分失败:', err)
+onBeforeUnmount(() => {
+  document.removeEventListener('click', handleClickOutside)
+  window.removeEventListener('storage', handleStorageChange)
+})
+
+// 路由变化时刷新积分
+watch(() => router.currentRoute.value.path, (path) => {
+  if ((path === '/' || path === '/home') && user.value.id) {
+    refreshPoints()
   }
+})
+
+// ========== 用户方法 ==========
+// 点击头像开启or关闭卡片
+const toggleUserCard = () => { showUserCard.value = !showUserCard.value }
+
+const refreshPoints = async () => {
+  if (!user.value.id) return
+  try { user.value.points = await unwrap(getPoints()) } catch { /* ignore */ }
 }
-
-const refreshPoints = () => fetchPoints()
-provide('refreshPoints', refreshPoints)
-
-// 刷新最近使用记录（供子组件调用）
-const refreshRecentHistory = () => fetchRecentHistory()
-provide('refreshRecentHistory', refreshRecentHistory)
-
-// 回调函数
-const handleParsed = (data) => {
-  styleDeclaration.value = data.styleDeclaration || ''
-  characters.value = data.characters || []
-  // 将后端数据结构映射为前端需要的格式，并保存
-  storyboards.value = data.storyboards.map(s => ({
-    id: Date.now() + '-' + Math.random().toString(36).substr(2, 6),
-    description: s.description || '',
-    characters: s.characters || [],
-    scenePrompt: s.scenePrompt || '',
-    sceneImageUrl: '',
-    keyframePrompt: s.detailedDescription || '',  // 关键：映射为 keyframePrompt
-    keyframeImageUrl: '',
-    videoPrompt: s.videoPrompt || s.detailedDescription || '',
-    videoUrl: ''
-  }))
-  characterImages.value = {}
-  fetchRecentHistory()  // 刷新最近使用记录
-  ElMessage.success('拆解成功！')
-}
-
-const handleCharacterGenerated = ({ name, imageUrl }) => {
-  characterImages.value[name] = imageUrl
-  fetchRecentHistory()  // 刷新最近使用记录
-}
-
-// 剧本生成成功后刷新历史记录
-const handleScriptGenerated = () => {
-  fetchRecentHistory()
-}
-
 // 退出登录
-const logout = async () => {
-  try {
-    await logoutApi()
-  } catch (err) {
-    console.error('登出失败:', err)
-  } finally {
-    localStorage.removeItem('user')
-    clearAllStorage()
-    router.push('/login')
+const handleLogout = async () => {
+  try { await logoutApi() } catch { /* ignore */ }
+  user.value = {}
+  showUserCard.value = false
+  recentHistory.value = []
+  localStorage.removeItem('user')
+  clearAllStorage()
+  ElMessage.success('已退出登录')
+}
+
+const goToLogin = () => router.push('/login')
+const goToRegister = () => router.push('/register')
+// 点击外部关闭卡片
+const handleClickOutside = (e) => {
+  if (userMenuRef.value && !userMenuRef.value.contains(e.target)) {
+    showUserCard.value = false
   }
 }
 
-// ========== 导航相关 ==========
-const navItems = [
-  { id: 'script',    label: '剧本生成' },
-  { id: 'parse',     label: '拆解剧本' },
-  { id: 'character', label: '角色生成' },
-  { id: 'storyboard',label: '分镜生成' },
-]
-const activeNav = ref('script')
-
-// 平滑滚动
-const scrollTo = (id) => {
-  const el = document.getElementById(id)
-  if (el) el.scrollIntoView({ behavior: 'smooth' })
+// ========== 点击导航滚动到对应Workspace ==========
+const scrollTo = (sectionId) => {
+  // 把当前激活的导航改成对应的id，比如 'parse'
+  activeNav.value = sectionId
+  // document.getElementById(sectionId) 在页面里找到 id = sectionId 的那个元素
+  // Js原生方法scrollIntoView 让浏览器自动滚动到这个元素的位置 behavior 平滑滚动
+  document.getElementById(sectionId)?.scrollIntoView({ behavior: 'smooth' })
 }
 
-// 滚动监听，自动高亮导航（防抖处理）
-let scrollTimeout = null
-const handleScroll = () => {
-  if (scrollTimeout) return
-  scrollTimeout = setTimeout(() => {
-    const scrollTop = window.scrollY
-    // 遍历所有工作区，找到当前滚动到的区域
-    for (const item of navItems) {
-      const el = document.getElementById(item.id)
-      if (el) {
-        const offsetTop = el.offsetTop
-        const offsetHeight = el.offsetHeight
-        if (scrollTop >= offsetTop - 100 && scrollTop < offsetTop + offsetHeight - 100) {
-          if (activeNav.value !== item.id) {
-            activeNav.value = item.id
-          }
-          break
-        }
-      }
-    }
-    scrollTimeout = null
-  }, 50)
+// ========== 数据流转 ==========
+const handleScriptGenerated = () => {
+  if (user.value.id) {
+    loadRecentHistory()
+    refreshPoints()
+  }
 }
 
-// ========== 灵感助手优化（加loading/错误处理/空状态） ==========
-const inspireVisible = ref(false)
-const showTutorial = ref(false)  // 教程弹窗
-const inspireTab = ref('rank')
-const rankList = ref([])
-const searchKeyword = ref('')
-const novelList = ref([])
-const analyzeWorkName = ref('')
-const analysisResult = ref(null)
+const handleParsed = (data) => {
+  characters.value = data.characters
+  storyboards.value = data.storyboards
+  styleDeclaration.value = data.styleDeclaration
+  saveCharacters(data.characters)
+  saveLocalStoryboards(data.storyboards)
+  saveStyleDeclaration(data.styleDeclaration)
+  scrollTo('character')
+  if (user.value.id) {
+    loadRecentHistory()
+    refreshPoints()
+  }
+}
 
-// 加载状态
-const inspireLoading = ref(false)
-const rankLoading = ref(false)
-const searchLoading = ref(false)
-const analyzeLoading = ref(false)
+const handleCharacterGenerated = (name, url) => {
+  characterImages.value[name] = url
+  saveCharacterImages(characterImages.value)
+  if (user.value.id) {
+    loadRecentHistory()
+    refreshPoints()
+  }
+}
 
-const openInspire = async () => {
-  if (inspireLoading.value) return
-  inspireLoading.value = true
-  inspireVisible.value = true
+const handleCharactersUpdate = (list) => {
+  characters.value = list;       //  把最新的角色列表存起来
+  saveCharacters(list);          //  同时保存到 localStorage（本地持久化）
+}
+
+const handleStoryboardsUpdate = (list) => {
+  storyboards.value = list
+  saveLocalStoryboards(list)
+}
+
+const handleStoryboardGenerated = () => {
+  if (user.value.id) {
+    loadRecentHistory()
+    refreshPoints()
+  }
+}
+
+// ========== 历史记录 ==========
+// 查看全部历史记录 （打开全部历史记录Dialog）
+const openHistoryDialog = () => {
+  historyDialogVisible.value = true
+  historyPage.value = 1
+  showUserCard.value = false
+  fetchHistoryList()
+}
+// 加载最近历史记录
+const loadRecentHistory = async () => {
+  if (!user.value.id) return
+  try {
+    const data = await unwrap(getRecentHistory(5))
+    recentHistory.value = data || []
+  } catch { /* ignore */ }
+}
+// 获取历史记录数据
+const fetchHistoryList = async () => {
+  try {
+    const data = await unwrap(getHistoryList(
+      historyPage.value,    // 当前第几页
+      historySize.value))   // 每页几条
+    historyList.value = data.list || []
+    historyTotal.value = data.total || 0
+  } catch { ElMessage.error('获取历史记录失败') }
+}
+// 全部历史记录分页方法
+const handlePageChange = (page) => {
+  historyPage.value = page   // 把当前页更新为选中的页
+  fetchHistoryList()         // 重新请求当前页的数据
+}
+// 历史记录中的工具名称 英文转中文
+const formatToolName = (tool) => {
+  const map = {
+    'script_generate': '剧本生成',
+    'parse_script': '拆解剧本',
+    'character_generate': '角色生成',
+    'scene_generate': '场景生成',
+    'keyframe_generate': '关键帧生成',
+    'video_generate': '视频生成'
+  }
+  return map[tool] || tool
+}
+
+// 悬停卡片中历史记录的 文本结果格式 文本太长就截取
+const formatResultText = (tool, text) => {
+  if (!text) return ''
+  return text.length > 20 ? text.substring(0, 20) + '...' : text
+}
+
+// 历史记录显示的 时间格式 刚刚 / 几分钟前 / 几小时前
+const formatRelativeTime = (timeStr) => {   // 定义一个函数，接收一个时间字符串
+  if (!timeStr) return ''
+  const d = new Date(timeStr)     // 把传进来的字符串变成 JS 能看懂的时间对象
+  const now = new Date()          // 获取当前现在的时间
+  const diff = now - d            // 算时间差：现在 - 过去 = 相差的毫秒数
+  if (diff < 60000) return '刚刚'
+  if (diff < 3600000) return Math.floor(diff / 60000) + '分钟前'
+  if (diff < 86400000) return Math.floor(diff / 3600000) + '小时前'
+  // 返回 ${月}-${日} ${时}:${分} 自动补0 1月-01，5日-05，9点-09，3分-03
+  return `${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`
+}
+// 复制方法
+const copyToClipboard = (text) => {
+  // 浏览器自带 API：把文本写入剪贴板，.then弹出提示
+  navigator.clipboard.writeText(text).then(() => {
+    ElMessage.success('已复制')
+  }).catch(() => ElMessage.error('复制失败'))
+}
+// /.../i 正则判断item.resultUrl是图片链接还是视频链接
+const isImageUrl = (url) => /\.(jpg|jpeg|png|gif|webp)(\?|$)/i.test(url)
+const isVideoUrl = (url) => /\.(mp4|webm|ogg)(\?|$)/i.test(url)
+
+// ========== 灵感助手 ==========
+const openInspire = () => {
+  inspireVisible.value = true         // 打开弹窗
+  if (!rankList.value.length) fetchRank()   // 如果还没拿过榜单数据，就去拿
+}
+
+const fetchRank = async () => {
   rankLoading.value = true
   try {
-    const res = await getRank()
-    if (res.data.code === 200) {
-      rankList.value = res.data.data
-    } else {
-      ElMessage.error('获取榜单失败')
-    }
-  } catch (err) {
-    ElMessage.error('网络错误，请稍后重试')
-    console.error('获取榜单失败:', err)
-  } finally {
-    rankLoading.value = false
-    inspireLoading.value = false
-  }
+  rankList.value = await unwrap(getRank())
+} catch { /* ignore */ }
+finally { rankLoading.value = false }
 }
 
-const searchNovel = async () => {
-  if (!searchKeyword.value || searchLoading.value) return
+const searchNovelHandle = async () => {
+  if (!searchKeyword.value.trim()) return ElMessage.warning('请输入关键词')
   searchLoading.value = true
   try {
-    const res = await searchNovelApi(searchKeyword.value)
-    if (res.data.code === 200) {
-      novelList.value = res.data.data
-      if (novelList.value.length === 0) {
-        ElMessage.info('未找到相关小说')
-      }
-    } else {
-      ElMessage.error('搜索失败')
-    }
-  } catch (err) {
-    ElMessage.error('网络错误，请稍后重试')
-    console.error('搜索失败:', err)
-  } finally {
-    searchLoading.value = false
-  }
+  novelList.value = await unwrap(searchNovel(searchKeyword.value))
+} catch { ElMessage.error('搜索失败') }
+finally { searchLoading.value = false }
 }
 
 const analyze = async () => {
-  if (!analyzeWorkName.value || analyzeLoading.value) return
+  if (!analyzeWorkName.value.trim()) return ElMessage.warning('请输入作品名')
   analyzeLoading.value = true
   try {
-    const res = await analyzeWork(analyzeWorkName.value)
-    if (res.data.code === 200) {
-      analysisResult.value = res.data.data
-    } else {
-      ElMessage.error('分析失败')
-    }
-  } catch (err) {
-    ElMessage.error('网络错误，请稍后重试')
-    console.error('分析失败:', err)
-  } finally {
-    analyzeLoading.value = false
-  }
+  analysisResult.value = await unwrap(analyzeWork(analyzeWorkName.value))
+} catch { ElMessage.error('分析失败') }
+finally { analyzeLoading.value = false }
 }
 
-onMounted(() => {
-  fetchPoints()
-  fetchRecentHistory()
-  window.addEventListener('scroll', handleScroll)
-})
-
-onUnmounted(() => {
-  window.removeEventListener('scroll', handleScroll)
-})
+/* ========== 多标签页同步 ==========
+监听浏览器多标签页的 localStorage 变化 
+作用：实现多个标签页之间的数据自动同步（登录/退出/角色/分镜/样式同步）
+JSON.stringify()  → 把对象 / 数组变成字符串（存进本地）
+JSON.parse() → 把字符串变回对象 / 数组（从本地拿出来用）
+*/
+const handleStorageChange = (e) => {
+  // 用户信息（登录/退出）同步
+  if (e.key === 'user') {
+    if (e.newValue) {
+      // 有值 = 登录了 / 用户信息变了
+      try {
+        user.value = JSON.parse(e.newValue)   // user.value = 最新用户信息
+        getPoints().then(res => {             // 重查积分
+          if (res.data.code === 200) user.value.points = res.data.data
+        }).catch(() => {})              // 重新加载角色、分镜、风格...
+        characters.value = loadCharacters()
+        characterImages.value = loadCharacterImages()
+        storyboards.value = loadLocalStoryboards()
+        styleDeclaration.value = loadStyleDeclaration()
+      } catch { /* 解析失败忽略 */ }
+    } else {          
+      user.value = {}           // 没值 = 退出登录 清空信息、数据
+      showUserCard.value = false
+      recentHistory.value = []
+      clearAllStorage()
+    }
+  // 角色列表数据同步
+  } else if (e.key === 'manju_characters' && e.newValue) {
+    try { characters.value = JSON.parse(e.newValue) } catch { /* 解析失败忽略 */ }
+  // 角色图片加载状态同步
+  } else if (e.key === 'manju_character_images' && e.newValue) {
+    try { characterImages.value = JSON.parse(e.newValue) } catch { /* 解析失败忽略 */ }
+  // 分镜数据同步
+  } else if (e.key === 'manju_local_storyboards' && e.newValue) {
+    try { storyboards.value = JSON.parse(e.newValue) } catch { /* 解析失败忽略 */ }
+  // 风格设定数据同步
+  } else if (e.key === 'manju_style_declaration' && e.newValue) {
+    try { styleDeclaration.value = JSON.parse(e.newValue) } catch { /* 解析失败忽略 */ }
+  }
+}
 </script>
 
 <style scoped>
-/* ===== Reset & Base ===== */
 .app-root {
   min-height: 100vh;
   background: linear-gradient(135deg, #fdf2f8, #f5f3ff, #eff6ff);
@@ -881,11 +814,11 @@ onUnmounted(() => {
 /* ===== Navbar ===== */
 .navbar {
   position: fixed; top: 0; left: 0; right: 0; z-index: 1000;
-  background: rgba(255,255,255,0.7);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-  border-bottom: 1px solid rgba(255,255,255,0.2);
-  box-shadow: 0 1px 8px rgba(0,0,0,0.04);
+  background: rgba(255,255,255,0.7);   /* 半透明白色 */
+  backdrop-filter: blur(12px);         /* 核心：背景模糊12px → 毛玻璃 */
+  -webkit-backdrop-filter: blur(12px); /* 兼容 Safari 浏览器 */
+  border-bottom: 1px solid rgba(255,255,255,0.2); /* 浅色边框，增强质感 */
+  box-shadow: 0 1px 8px rgba(0,0,0,0.04); /* 轻微阴影，悬浮感 */
 }
 .navbar-container {
   max-width: 1280px; margin: 0 auto;
@@ -976,17 +909,17 @@ onUnmounted(() => {
   transform: scale(1.08);
 }
 .user-card {
-  position: absolute;
+  position: absolute;     /* 绝对定位 */
   top: 48px; right: 0;
   width: 320px;
   background: white;
   border-radius: 16px;
   box-shadow: 0 10px 40px rgba(0,0,0,0.12);
   padding: 20px;
-  z-index: 1001;
-  animation: cardSlideIn 0.2s ease;
-}
-@keyframes cardSlideIn {
+  z-index: 1001;      /* 层级：谁在上面谁在下面，数字越大越在上面 */
+  animation: cardSlideIn 0.2s ease;  /* 开启动画 ease先慢后快 */
+}           /* from动画开始透明度0位置往上偏移8px，to不透明回原位 */
+@keyframes cardSlideIn {   /* 效果是：卡片淡入 + 从上往下轻轻滑下来！*/
   from { opacity: 0; transform: translateY(-8px); }
   to { opacity: 1; transform: translateY(0); }
 }
@@ -1024,7 +957,7 @@ onUnmounted(() => {
   color: #9ca3af; font-size: 13px;
 }
 .user-card-history-list {
-  display: flex; flex-direction: column; gap: 8px;
+  display: flex; flex-direction: column; gap: 8px;   /* 垂直排列（从上到下，竖列）row水平排列*/
 }
 .user-card-history-item {
   display: flex; align-items: center; gap: 8px;

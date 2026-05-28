@@ -13,7 +13,7 @@
         <el-form-item>
           <el-input
             v-model="form.username"
-            placeholder="邮箱 / 用户名"
+            placeholder="用户名"
             class="login-input"
           />
         </el-form-item>
@@ -30,7 +30,7 @@
 
         <div class="form-options">
           <el-checkbox v-model="rememberMe">记住我</el-checkbox>
-          <el-link type="primary" :underline="false" class="forgot-link" @click="showForgotPassword = true">忘记密码？</el-link>
+          <el-link type="primary" underline="never" class="forgot-link" @click="showForgotPassword = true">忘记密码？</el-link>
         </div>
 
         <el-button
@@ -42,7 +42,7 @@
         </el-button>
 
         <div class="register-tip">
-          还没有账号？<el-link type="primary" :underline="false" @click="$router.push('/register')">立即注册</el-link>
+          还没有账号？<el-link type="primary" underline="never" @click="$router.push('/register')">立即注册</el-link>
         </div>
       </el-form>
     </div>
@@ -60,12 +60,11 @@
 <script setup>
 import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { login } from '@/api/user'
+import { login, getPoints } from '@/api/user'
 import { ElMessage } from 'element-plus'
 
 const router = useRouter()
 
-// 表单数据
 const form = ref({
   username: '',
   password: ''
@@ -75,27 +74,58 @@ const loading = ref(false)
 const rememberMe = ref(false)
 const showForgotPassword = ref(false)
 
-// 初始化：如果之前有记住的用户名，自动回填
-onMounted(() => {
+/**
+ * 页面挂载时执行：
+ * 1. 检查 localStorage 是否有已记住的用户名（来自“记住我”功能），
+ *    如果有则自动填充用户名并勾选“记住我”复选框；
+ * 2. 检查 localStorage 是否有完整的用户信息（登录状态），
+ *    如果有则尝试获取积分以验证登录是否仍然有效，
+ *    验证成功则自动跳转到首页。
+ */
+onMounted(async () => {
   const savedUser = localStorage.getItem('remember_username')
   if (savedUser) {
     form.value.username = savedUser
     rememberMe.value = true
+  }
+
+  // 检查是否已登录（localStorage 中有 user 且 session 有效）
+  const userStr = localStorage.getItem('user')
+  if (userStr) {
+    try {
+      const res = await getPoints()
+      if (res.data.code === 200) {
+        // session 有效，直接跳转首页
+        router.push('/')
+        return
+      }
+    } catch {
+      // session 无效，清除过期数据，留在登录页
+      localStorage.removeItem('user')
+    }
   }
 })
 
 const goHome = () => {
   router.push('/')
 }
-
+/**
+ * 处理登录按钮点击事件：
+ * 1. 基本非空校验；
+ * 2. 如果勾选“记住我”，将用户名保存到 localStorage；
+ * 3. 调用后端登录接口；
+ * 4. 登录成功则将用户信息存入 localStorage 并跳转首页；
+ * 5. 登录失败则显示错误信息；
+ * 6. 捕获网络异常并提示。
+ */
 const handleLogin = async () => {
   if (!form.value.username || !form.value.password) {
     ElMessage.warning('请输入用户名和密码')
     return
   }
 
-  // 记住用户名（仅在勾选时）
   if (rememberMe.value) {
+    // 把用户名存到浏览器本地，下次打开自动填进去。
     localStorage.setItem('remember_username', form.value.username)
   } else {
     localStorage.removeItem('remember_username')
@@ -105,9 +135,14 @@ const handleLogin = async () => {
   try {
     const res = await login(form.value.username, form.value.password)
     if (res.data.code === 200) {
-      ElMessage.success('登录成功')
+      // 把整个用户信息（账号、昵称、token 等）存到浏览器。
+      // 'user' = 存储的名字（代表登录用户信息）
+      // res.data.data = 后端返回的整个用户对象
+      // JSON.stringify() = 把对象变成字符串存起来
+      // localStorage 只能存文字，不能存对象
       localStorage.setItem('user', JSON.stringify(res.data.data))
-      router.push('/home')
+      ElMessage.success('登录成功')
+      router.push('/')
     } else {
       ElMessage.error(res.data.msg)
     }
